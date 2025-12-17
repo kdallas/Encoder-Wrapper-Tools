@@ -6,7 +6,11 @@ class BatchEncoder
     private $pathInput = "";
     private $prefixInput = "";
     private $recursive = false;
-    
+
+    // Paths
+    private $wrkPath = ""; // Destination for .h265/.opus/.mkv files
+    private $jobPath = ""; // Destination for .ps1 files
+
     // Profiles & Modifiers
     private $videoProfileKey = "default";
     private $audioProfileKey = "default";
@@ -20,9 +24,18 @@ class BatchEncoder
     private $finalAudOptions = "";
 
     public function __construct($argv) {
-        $this->parseArguments($argv);
-        $this->validateInputs();
-        $this->resolveProfiles();
+        // Initialize Defaults
+        $this->wrkPath = Config::DEFAULT_WRK_PATH;
+        $this->jobPath = Config::DEFAULT_JOB_PATH;
+
+        try {
+            $this->parseArguments($argv);
+            $this->validateInputs();
+            $this->resolveProfiles();
+        } catch (Exception $e) {
+            echo "Error: " . $e->getMessage() . "\n";
+            exit(1);
+        }
     }
 
     public function run() {
@@ -41,7 +54,6 @@ class BatchEncoder
             
             if (str_starts_with($arg, '--path=')) {
                 $this->pathInput = substr($arg, 7);
-                // Stitch path spaces
                 for ($j = $i + 1; $j < count($argv); $j++) {
                     if (str_starts_with($argv[$j], '-')) break; 
                     $this->pathInput .= " " . $argv[$j];
@@ -50,12 +62,23 @@ class BatchEncoder
             } 
             elseif (str_starts_with($arg, '--prefix=')) {
                 $this->prefixInput = substr($arg, 9);
-                // Stitch prefix spaces
                 for ($j = $i + 1; $j < count($argv); $j++) {
                     if (str_starts_with($argv[$j], '-')) break;
                     $this->prefixInput .= " " . $argv[$j];
                     $i++;
                 }
+            }
+            // Override Work Files Path (Where .h265 goes)
+            elseif (str_starts_with($arg, '--out-path=')) {
+                $raw = substr($arg, 11);
+                // Ensure Windows Backslashes for the PowerShell script
+                $this->wrkPath = $this->normalizePath($raw, '\\'); 
+            }
+            // Override Batch Script Path (Where .ps1 goes)
+            elseif (str_starts_with($arg, '--job-path=')) {
+                $raw = substr($arg, 11);
+                // Standard slashes are fine for PHP writing files
+                $this->jobPath = $this->normalizePath($raw, '/');
             }
             elseif (str_starts_with($arg, '--video=')) {
                 $this->videoProfileKey = substr($arg, 8);
@@ -84,6 +107,16 @@ class BatchEncoder
         }
     }
 
+    private function normalizePath($path, $separator) {
+        // Replace all slash types with the desired separator
+        $clean = str_replace(['/', '\\'], $separator, $path);
+        // Ensure trailing slash
+        if (!str_ends_with($clean, $separator)) {
+            $clean .= $separator;
+        }
+        return $clean;
+    }
+
     private function validateInputs() {
         if (empty($this->pathInput)) { throw new Exception("Missing --path value"); }
         if (empty($this->prefixInput)) { throw new Exception("Missing --prefix value"); }
@@ -100,15 +133,13 @@ class BatchEncoder
             throw new Exception("Unknown Audio Profile '{$this->audioProfileKey}'");
         }
 
-        // Resolve Base Strings/Closures
         $rawVid = $vidProfiles[$this->videoProfileKey];
         $this->finalVidOptions = is_callable($rawVid) ? $rawVid($this->extraArgs) : $rawVid;
 
         $rawAud = $audProfiles[$this->audioProfileKey];
         $this->finalAudOptions = is_callable($rawAud) ? $rawAud($this->extraArgs) : $rawAud;
 
-        // VPP Logic (Your Switch Statement)
-        // Note: If input is empty, your 'default' case applies edgelevel.
+        // VPP Logic
         $vppString = '';
         switch ($this->vppInput) {
             case 'none':
@@ -133,7 +164,6 @@ class BatchEncoder
             echo "Modifier [VPP]: {$this->vppInput} -> $vppString\n";
         }
 
-        // Apply Modifiers
         if (!empty($this->resizeInput)) {
             if (!preg_match('/^\d+x\d+$/', $this->resizeInput)) {
                 throw new Exception("Invalid resize format '{$this->resizeInput}'. Use WxH.");
@@ -151,17 +181,17 @@ class BatchEncoder
         }
 
         echo "Profile [Video]: {$this->videoProfileKey}\n";
-        echo "Profile [Audio]: {$this->audioProfileKey}\n\n";
+        echo "Profile [Audio]: {$this->audioProfileKey}\n";
+        echo "Output Path (Work): {$this->wrkPath}\n";
+        echo "Output Path (Jobs): {$this->jobPath}\n\n";
     }
 
     private function scanTargets() {
-        // Normalize Git Bash paths to Windows Drive Letter
         if (preg_match('/^\/([a-zA-Z])\/(.*)/', $this->pathInput, $matches)) {
             $drive = strtoupper($matches[1]);
             $this->pathInput = $drive . ':/' . $matches[2];
         }
 
-        // Ensure forward slashes for internal PHP usage
         $targetPath = str_replace('\\', '/', $this->pathInput);
         $srcExts = ['mkv','mp4'];
 
@@ -170,12 +200,17 @@ class BatchEncoder
             return [$targetPath];
         } 
         elseif (is_dir($targetPath)) {
-            if (!str_ends_with($targetPath, '/')) $targetPath .= '/';
-            
+            if (!str_ends_with($targetPath, '/')) {
+                $targetPath .= '/';
+            }
+
             echo "Scanning: $targetPath (Recursive: " . ($this->recursive ? 'ON' : 'OFF') . ")\n";
             $scanned = ScanDir::scan($targetPath, $srcExts, $this->recursive);
 
-            if (empty($scanned)) throw new Exception("No valid files found in directory.");
+            if (empty($scanned)) {
+                throw new Exception("No valid files found in directory.");
+            }
+
             return $scanned;
         } 
         else {
@@ -184,17 +219,17 @@ class BatchEncoder
     }
 
     private function generateBatchFiles($files) {
-        // Safety Check for Output Directory
-        if (!is_dir(Config::LNX_OUT)) {
-            if (!mkdir(Config::LNX_OUT, 0777, true)) {
-                throw new Exception("Failed to create output directory: " . Config::LNX_OUT);
+        // Ensure Batch Script Directory Exists
+        if (!is_dir($this->jobPath)) {
+            if (!mkdir($this->jobPath, 0777, true)) {
+                throw new Exception("Failed to create batch job output directory: " . $this->jobPath);
             }
         }
 
-        $videoBat = Config::LNX_OUT . $this->prefixInput . '_vid.ps1';
-        $audioBat = Config::LNX_OUT . $this->prefixInput . '_aud.ps1';
-        $mergeBat = Config::LNX_OUT . $this->prefixInput . '_mux.ps1';
-        $cleanBat = Config::LNX_OUT . $this->prefixInput . '_del.ps1';
+        $videoBat = $this->jobPath . $this->prefixInput . '_vid.ps1';
+        $audioBat = $this->jobPath . $this->prefixInput . '_aud.ps1';
+        $mergeBat = $this->jobPath . $this->prefixInput . '_mux.ps1';
+        $cleanBat = $this->jobPath . $this->prefixInput . '_del.ps1';
 
         // Reset output files
         if(file_exists($videoBat)) unlink($videoBat);
@@ -209,13 +244,14 @@ class BatchEncoder
             $fullPathUnix = str_replace('\\', '/', $fullPath);
             $fileName = basename($fullPathUnix);
 
-            // --- INTELLIGENT ANALYSIS (Probe Logic) ---
+            // Probe Logic
             $probeData = Probe::analyze($fullPathUnix);
             if (!$probeData) {
                 echo "Warning: Could not analyze file $fileName. Using defaults.\n";
                 $probeData = ['width' => 1920, 'height' => 1080, 'is_hdr' => false, 'primaries' => null];
             }
 
+            // Audio Logic
             $audioExt = 'opus'; // Default for our encoding profiles
         
             if ($this->audioProfileKey === 'copy') {
@@ -229,9 +265,9 @@ class BatchEncoder
                     'truehd' => 'thd',
                     'mp3' => 'mp3'
                 ];
-                
+
                 $detected = strtolower($probeData['audio_codec'] ?? '');
-                
+
                 if (array_key_exists($detected, $codecMap)) {
                     $audioExt = $codecMap[$detected];
                 } else {
@@ -242,6 +278,7 @@ class BatchEncoder
                 echo "  [Audio]: Copy mode detected. Source: $detected -> Ext: .$audioExt\n";
             }
 
+            // Video/Level Logic
             $targetW = $probeData['width'];
             $targetH = $probeData['height'];
 
@@ -264,20 +301,19 @@ class BatchEncoder
             } else {
                 if ($probeData['primaries'] === 'bt709') {
                     $colorParams = "--transfer bt709 --colorprim bt709 --colormatrix bt709";
-                    echo "  [Auto-Spec]: SDR (bt709) Detected. Enforcing flags.\n";
+                    echo "  [Auto-Spec]: SDR (bt709) Detected.\n";
                 } else {
-                    $colorParams = ""; 
-                    echo "  [Auto-Spec]: SDR (Unknown/Other). Omitting color flags.\n";
+                    echo "  [Auto-Spec]: SDR (Unknown/Other).\n";
                 }
             }
 
-            // --- BUILD JOBS ---
-            // Calculate Paths
+            // BUILD JOBS
+            // Use $this->wrkPath instead of Config::OUT_PATH
             $winSrc = str_replace('/', '\\', $fullPathUnix);
-            $outVid = Config::OUT_PATH . $this->swapExt($fileName, 'h265');
-            $outAud = Config::OUT_PATH . $this->swapExt($fileName, $audioExt);
-            $preMux = Config::OUT_PATH . $this->swapExt($fileName, 'mkv', '__');
-            $finMkv = Config::OUT_PATH . $this->swapExt($fileName, 'mkv');
+            $outVid = $this->wrkPath . $this->swapExt($fileName, 'h265');
+            $outAud = $this->wrkPath . $this->swapExt($fileName, $audioExt);
+            $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
+            $finMkv = $this->wrkPath . $this->swapExt($fileName, 'mkv');
 
             $currentVidOptions = $this->finalVidOptions . " --level $level $colorParams $hdrParams";
 
