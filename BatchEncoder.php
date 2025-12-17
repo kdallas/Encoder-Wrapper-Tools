@@ -155,13 +155,13 @@ class BatchEncoder
     }
 
     private function scanTargets() {
-        // 1. Normalize Git Bash paths to Windows Drive Letter
+        // Normalize Git Bash paths to Windows Drive Letter
         if (preg_match('/^\/([a-zA-Z])\/(.*)/', $this->pathInput, $matches)) {
             $drive = strtoupper($matches[1]);
             $this->pathInput = $drive . ':/' . $matches[2];
         }
 
-        // 2. Ensure forward slashes for internal PHP usage
+        // Ensure forward slashes for internal PHP usage
         $targetPath = str_replace('\\', '/', $this->pathInput);
         $srcExts = ['mkv','mp4'];
 
@@ -184,23 +184,23 @@ class BatchEncoder
     }
 
     private function generateBatchFiles($files) {
-        // 1. Safety Check for Output Directory
+        // Safety Check for Output Directory
         if (!is_dir(Config::LNX_OUT)) {
             if (!mkdir(Config::LNX_OUT, 0777, true)) {
                 throw new Exception("Failed to create output directory: " . Config::LNX_OUT);
             }
         }
 
-        $videoBat  = Config::LNX_OUT . $this->prefixInput . '_vid.ps1';
-        $audioBat  = Config::LNX_OUT . $this->prefixInput . '_aud.ps1';
-        $mergeBat  = Config::LNX_OUT . $this->prefixInput . '_mux.ps1';
-        $deleteBat = Config::LNX_OUT . $this->prefixInput . '_del.ps1'; // New File
+        $videoBat = Config::LNX_OUT . $this->prefixInput . '_vid.ps1';
+        $audioBat = Config::LNX_OUT . $this->prefixInput . '_aud.ps1';
+        $mergeBat = Config::LNX_OUT . $this->prefixInput . '_mux.ps1';
+        $cleanBat = Config::LNX_OUT . $this->prefixInput . '_del.ps1';
 
         // Reset output files
-        if(file_exists($videoBat))  unlink($videoBat);
-        if(file_exists($audioBat))  unlink($audioBat);
-        if(file_exists($mergeBat))  unlink($mergeBat);
-        if(file_exists($deleteBat)) unlink($deleteBat);
+        if(file_exists($videoBat)) unlink($videoBat);
+        if(file_exists($audioBat)) unlink($audioBat);
+        if(file_exists($mergeBat)) unlink($mergeBat);
+        if(file_exists($cleanBat)) unlink($cleanBat);
 
         $mergeOptions = '-c copy -map 0:v:0 -map 1:a:0';
         $maxLength = 80;
@@ -276,7 +276,7 @@ class BatchEncoder
             $winSrc = str_replace('/', '\\', $fullPathUnix);
             $outVid = Config::OUT_PATH . $this->swapExt($fileName, 'h265');
             $outAud = Config::OUT_PATH . $this->swapExt($fileName, $audioExt);
-            $preMrg = Config::OUT_PATH . $this->swapExt($fileName, 'mkv', '__');
+            $preMux = Config::OUT_PATH . $this->swapExt($fileName, 'mkv', '__');
             $finMkv = Config::OUT_PATH . $this->swapExt($fileName, 'mkv');
 
             $currentVidOptions = $this->finalVidOptions . " --level $level $colorParams $hdrParams";
@@ -290,31 +290,31 @@ class BatchEncoder
             );
 
             $preMxJob = sprintf('%s -o "%s" "%s"' . "\n", 
-                Config::MKV_MRG, $preMrg, $outVid
+                Config::MKV_MRG, $preMux, $outVid
             );
 
-            $mergeJob = sprintf('%s -i "%s" -i "%s" %s "%s"' . "\n", 
-                Config::AUD_ENC, $preMrg, $outAud, $mergeOptions, $finMkv
+            $muxerJob = sprintf('%s -i "%s" -i "%s" %s "%s"' . "\n", 
+                Config::MKV_MUX, $preMux, $outAud, $mergeOptions, $finMkv
             );
 
             // SEPARATE CLEANUP JOB
-            $cleanupJob  = sprintf('Remove-Item "%s"' . "\n", $outVid);
-            $cleanupJob .= sprintf('Remove-Item "%s"' . "\n", $outAud);
-            $cleanupJob .= sprintf('Remove-Item "%s"' . "\n", $preMrg);
+            $cleanJob  = sprintf('Remove-Item "%s"' . "\n", $outVid);
+            $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $outAud);
+            $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $preMux);
 
             // Output to Screen
             $displaySrc = (strlen($winSrc) > $maxLength) ? '...' . substr($winSrc, -$maxLength) : $winSrc;
             echo "Queuing: $displaySrc\n";
 
             // Write to Files
-            file_put_contents($videoBat,  $videoJob,   FILE_APPEND);
-            file_put_contents($audioBat,  $audioJob,   FILE_APPEND);
-            file_put_contents($mergeBat,  $preMxJob,   FILE_APPEND);
-            file_put_contents($mergeBat,  $mergeJob,   FILE_APPEND);
-            file_put_contents($deleteBat, $cleanupJob, FILE_APPEND);
+            file_put_contents($videoBat, $videoJob, FILE_APPEND);
+            file_put_contents($audioBat, $audioJob, FILE_APPEND);
+            file_put_contents($mergeBat, $preMxJob, FILE_APPEND);
+            file_put_contents($mergeBat, $muxerJob, FILE_APPEND);
+            file_put_contents($cleanBat, $cleanJob, FILE_APPEND);
         }
 
-        echo "\nDone. Created:\n- $videoBat\n- $audioBat\n- $mergeBat\n- $deleteBat\n";
+        echo "\nDone. Created:\n- $videoBat\n- $audioBat\n- $mergeBat\n- $cleanBat\n";
     }
 
     private function swapExt($filename, $newExt, $suffix='') {
