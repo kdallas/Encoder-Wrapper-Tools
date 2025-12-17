@@ -9,6 +9,6 @@ class Config
     const FFPROBE = 'E:\Apps\StaxRip-x64-2.0.6.0\Apps\Encoders\ffmpeg\ffprobe.exe';
 
     // DEFAULTS (Can be overridden via CLI)
-    const DEFAULT_WRK_PATH = 'R:\temp-stuff\_encodes\\'; // Where we save the encoder work files and final output
-    const DEFAULT_JOB_PATH = './output/';                // Where we save the .ps1 batch job files
+    const DEFAULT_WRK_PATH = 'R:/temp-stuff/_encodes/'; // Where we save the encoder work files and final output
+    const DEFAULT_JOB_PATH = './output/';               // Where we save the .ps1 batch job files
 }

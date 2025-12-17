@@ -24,11 +24,11 @@ class BatchEncoder
     private $finalAudOptions = "";
 
     public function __construct($argv) {
-        // Initialize Defaults
-        $this->wrkPath = Config::DEFAULT_WRK_PATH;
-        $this->jobPath = Config::DEFAULT_JOB_PATH;
-
         try {
+            // Initialize Defaults (Sanitized immediately)
+            $this->wrkPath = $this->sanitizePath(Config::DEFAULT_WRK_PATH, true);
+            $this->jobPath = $this->sanitizePath(Config::DEFAULT_JOB_PATH, true);
+
             $this->parseArguments($argv);
             $this->validateInputs();
             $this->resolveProfiles();
@@ -48,17 +48,59 @@ class BatchEncoder
         }
     }
 
+    /**
+     * CENTRAL PATH CLEANER
+     * 1. Converts backslashes to forward slashes.
+     * 2. Fixes Git Bash paths (/c/Users -> C:/Users).
+     * 3. Enforces trailing slash if $isDir is true.
+     */
+    private function sanitizePath($path, $isDir = false) {
+        // 1. Unify Slashes
+        $clean = str_replace('\\', '/', $path);
+
+        // 2. Fix Git Bash "Drive Letter" paths (e.g., /c/Windows -> C:/Windows)
+        if (preg_match('/^\/([a-zA-Z])\/(.*)/', $clean, $matches)) {
+            $drive = strtoupper($matches[1]);
+            $clean = $drive . ':/' . $matches[2];
+        }
+
+        // 3. Trailing Slash Logic (only for directories)
+        if ($isDir && !str_ends_with($clean, '/')) {
+            $clean .= '/';
+        }
+        
+        // Trim trailing slash for files (if user accidentally added one?) 
+        // Not strictly necessary but keeps file paths clean.
+        if (!$isDir && str_ends_with($clean, '/')) {
+            $clean = rtrim($clean, '/');
+        }
+
+        return $clean;
+    }
+
+    /**
+     * OUTPUT HELPER
+     * Converts internal forward slashes to Windows backslashes
+     * ONLY for writing into the .ps1 files.
+     */
+    private function toWinPath($path) {
+        return str_replace('/', '\\', $path);
+    }
+
     private function parseArguments($argv) {
         for ($i = 1; $i < count($argv); $i++) {
             $arg = $argv[$i];
             
             if (str_starts_with($arg, '--path=')) {
-                $this->pathInput = substr($arg, 7);
+                $raw = substr($arg, 7);
+                // Stitch spaces if path was unquoted
                 for ($j = $i + 1; $j < count($argv); $j++) {
                     if (str_starts_with($argv[$j], '-')) break; 
-                    $this->pathInput .= " " . $argv[$j];
+                    $raw .= " " . $argv[$j];
                     $i++;
                 }
+                // Sanitize immediately (False for $isDir, because it might be a file)
+                $this->pathInput = $this->sanitizePath($raw, false);
             } 
             elseif (str_starts_with($arg, '--prefix=')) {
                 $this->prefixInput = substr($arg, 9);
@@ -68,17 +110,13 @@ class BatchEncoder
                     $i++;
                 }
             }
-            // Override Work Files Path (Where .h265 goes)
             elseif (str_starts_with($arg, '--out-path=')) {
-                $raw = substr($arg, 11);
-                // Ensure Windows Backslashes for the PowerShell script
-                $this->wrkPath = $this->normalizePath($raw, '\\'); 
+                // User override for Work Path -> Force Dir
+                $this->wrkPath = $this->sanitizePath(substr($arg, 11), true);
             }
-            // Override Batch Script Path (Where .ps1 goes)
             elseif (str_starts_with($arg, '--job-path=')) {
-                $raw = substr($arg, 11);
-                // Standard slashes are fine for PHP writing files
-                $this->jobPath = $this->normalizePath($raw, '/');
+                // User override for Job Path -> Force Dir
+                $this->jobPath = $this->sanitizePath(substr($arg, 11), true);
             }
             elseif (str_starts_with($arg, '--video=')) {
                 $this->videoProfileKey = substr($arg, 8);
@@ -105,16 +143,6 @@ class BatchEncoder
                 $this->extraArgs[$parts[0]] = $parts[1] ?? true; 
             }
         }
-    }
-
-    private function normalizePath($path, $separator) {
-        // Replace all slash types with the desired separator
-        $clean = str_replace(['/', '\\'], $separator, $path);
-        // Ensure trailing slash
-        if (!str_ends_with($clean, $separator)) {
-            $clean .= $separator;
-        }
-        return $clean;
     }
 
     private function validateInputs() {
@@ -187,12 +215,9 @@ class BatchEncoder
     }
 
     private function scanTargets() {
-        if (preg_match('/^\/([a-zA-Z])\/(.*)/', $this->pathInput, $matches)) {
-            $drive = strtoupper($matches[1]);
-            $this->pathInput = $drive . ':/' . $matches[2];
-        }
+        // NOTE: $this->pathInput is already sanitized (C:/Format/...)
 
-        $targetPath = str_replace('\\', '/', $this->pathInput);
+        $targetPath = $this->pathInput; 
         $srcExts = ['mkv','mp4'];
 
         if (is_file($targetPath)) {
@@ -200,6 +225,7 @@ class BatchEncoder
             return [$targetPath];
         } 
         elseif (is_dir($targetPath)) {
+            // Ensure trailing slash for directory scanning
             if (!str_ends_with($targetPath, '/')) {
                 $targetPath .= '/';
             }
@@ -210,8 +236,9 @@ class BatchEncoder
             if (empty($scanned)) {
                 throw new Exception("No valid files found in directory.");
             }
-
-            return $scanned;
+            
+            // ScanDir might return mixed slashes depending on OS; unify them here for safety.
+            return array_map(fn($p) => $this->sanitizePath($p, false), $scanned);
         } 
         else {
             throw new Exception("Target path does not exist: $targetPath");
@@ -240,12 +267,12 @@ class BatchEncoder
         $mergeOptions = '-c copy -map 0:v:0 -map 1:a:0';
         $maxLength = 80;
 
-        foreach ($files as $fullPath) {
-            $fullPathUnix = str_replace('\\', '/', $fullPath);
-            $fileName = basename($fullPathUnix);
+        foreach ($files as $cleanPath) {
+            // $cleanPath is guaranteed to be C:/Path/to/file.mkv
+            $fileName = basename($cleanPath);
 
             // Probe Logic
-            $probeData = Probe::analyze($fullPathUnix);
+            $probeData = Probe::analyze($cleanPath);
             if (!$probeData) {
                 echo "Warning: Could not analyze file $fileName. Using defaults.\n";
                 $probeData = ['width' => 1920, 'height' => 1080, 'is_hdr' => false, 'primaries' => null];
@@ -275,12 +302,9 @@ class BatchEncoder
                     $audioExt = 'mka'; 
                     echo "  [Audio]: Unknown source codec '$detected'. Defaulting to .mka\n";
                 }
-
                 echo "  [Audio]: Copy mode detected. Source: $detected -> Ext: .$audioExt\n";
-
             } else {
-                // Feedback for Transcode scenarios
-                echo "  [Audio]: Encoding to {$this->audioProfileKey}. Ext: .$audioExt\n";                
+                echo "  [Audio]: Encoding to {$this->audioProfileKey}. Ext: .$audioExt\n";
             }
 
             // Video/Level Logic
@@ -313,8 +337,7 @@ class BatchEncoder
             }
 
             // BUILD JOBS
-            // Use $this->wrkPath instead of Config::OUT_PATH
-            $winSrc = str_replace('/', '\\', $fullPathUnix);
+            // 1. Calculate Outputs (Forward Slashes Internal)
             $outVid = $this->wrkPath . $this->swapExt($fileName, 'h265');
             $outAud = $this->wrkPath . $this->swapExt($fileName, $audioExt);
             $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
@@ -322,29 +345,48 @@ class BatchEncoder
 
             $currentVidOptions = $this->finalVidOptions . " --level $level $colorParams $hdrParams";
 
+            // 2. Format Commands (Use toWinPath() here for the Batch File content)
+            
+            // Video
             $videoJob = sprintf('%s %s -i "%s" -o "%s"' . "\n", 
-                Config::VID_ENC, $currentVidOptions, $winSrc, $outVid
+                $this->toWinPath(Config::VID_ENC), 
+                $currentVidOptions, 
+                $this->toWinPath($cleanPath), 
+                $this->toWinPath($outVid)
             );
 
+            // Audio
             $audioJob = sprintf('%s -i "%s" %s "%s"' . "\n", 
-                Config::AUD_ENC, $winSrc, $this->finalAudOptions, $outAud
+                $this->toWinPath(Config::AUD_ENC), 
+                $this->toWinPath($cleanPath), 
+                $this->finalAudOptions, 
+                $this->toWinPath($outAud)
             );
 
+            // Pre-Mux (Video only into MKV)
             $preMxJob = sprintf('%s -o "%s" "%s"' . "\n", 
-                Config::MKV_MRG, $preMux, $outVid
+                $this->toWinPath(Config::MKV_MRG), 
+                $this->toWinPath($preMux), 
+                $this->toWinPath($outVid)
             );
 
+            // Muxer (Audio + Video)
             $muxerJob = sprintf('%s -i "%s" -i "%s" %s "%s"' . "\n", 
-                Config::MKV_MUX, $preMux, $outAud, $mergeOptions, $finMkv
+                $this->toWinPath(Config::MKV_MUX), 
+                $this->toWinPath($preMux), 
+                $this->toWinPath($outAud), 
+                $mergeOptions, 
+                $this->toWinPath($finMkv)
             );
 
-            // SEPARATE CLEANUP JOB
-            $cleanJob  = sprintf('Remove-Item "%s"' . "\n", $outVid);
-            $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $outAud);
-            $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $preMux);
+            // Cleanup
+            $cleanJob  = sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outVid));
+            $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outAud));
+            $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($preMux));
 
-            // Output to Screen
-            $displaySrc = (strlen($winSrc) > $maxLength) ? '...' . substr($winSrc, -$maxLength) : $winSrc;
+            // Output to Screen (Display Windows style for user familiarity)
+            $displaySrc = $this->toWinPath($cleanPath);
+            $displaySrc = (strlen($displaySrc) > $maxLength) ? '...' . substr($displaySrc, -$maxLength) : $displaySrc;
             echo "Queuing: $displaySrc\n";
 
             // Write to Files
