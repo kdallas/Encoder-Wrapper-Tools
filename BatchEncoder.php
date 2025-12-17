@@ -275,7 +275,12 @@ class BatchEncoder
                     $audioExt = 'mka'; 
                     echo "  [Audio]: Unknown source codec '$detected'. Defaulting to .mka\n";
                 }
+
                 echo "  [Audio]: Copy mode detected. Source: $detected -> Ext: .$audioExt\n";
+
+            } else {
+                // Feedback for Transcode scenarios
+                echo "  [Audio]: Encoding to {$this->audioProfileKey}. Ext: .$audioExt\n";                
             }
 
             // Video/Level Logic
