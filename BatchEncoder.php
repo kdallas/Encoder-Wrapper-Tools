@@ -318,6 +318,15 @@ class BatchEncoder
                     $activeProfile = 'copy';
                     echo "  [Smart Audio]: Source is Opus Stereo (Pans Profile). Switched to Copy.\n";
                 }
+            } 
+            elseif ($srcCodec === 'aac') {
+                // Rule: Copy AAC unless downmixing (e.g. 5.1 to Stereo)
+                $isDownmix = ($srcCh > 2) && ($activeProfile === 'opus-stereo' || $activeProfile === 'opus-pans');
+                
+                if (!$isDownmix) {
+                    $activeProfile = 'copy';
+                    echo "  [Smart Audio]: Source is AAC (No Downmix). Switched to Copy.\n";
+                }
             }
             // --- SMART AUDIO LOGIC END ---
 
