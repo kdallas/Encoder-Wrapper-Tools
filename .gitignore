@@ -18,6 +18,9 @@ dist/
 target/
 dist/
 
+# Temp output
+output/
+
 # JetBrains IDE
 .idea/
 *-bak*
