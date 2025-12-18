@@ -2,25 +2,14 @@
 
 class Probe
 {
-    // Returns: ['width', 'height', 'is_hdr', 'hdr_mastering', 'primaries', 'audio_codec']
+    // Returns: ['width', 'height', 'is_hdr', 'hdr_mastering', 'primaries', 'audio_codec', 'audio_channels']
     public static function analyze($filePath) {
         if (!file_exists(Config::FFPROBE)) {
             throw new Exception("ffprobe not found at: " . Config::FFPROBE);
         }
 
-        // We select Video Stream 0 (v:0) AND Audio Stream 0 (a:0)
-        // We look for codec_name to identify audio type
-        // $cmd = sprintf('"%s" -hide_banner -loglevel warning -select_streams v:0 -show_entries "stream=width,height,color_space,color_primaries,color_transfer" -select_streams a:0 -show_entries "stream=codec_name" -select_streams v:0 -show_frames -read_intervals "%%+#1" -show_entries "frame=side_data_list" -print_format json -i "%s" 2>&1',
-        //     Config::FFPROBE,
-        //     $filePath
-        // );
-
-        // Note: The command above uses multiple -select_streams. 
-        // A cleaner way often used is -show_streams and filtering in PHP, 
-        // but explicit selection works if ordered correctly. 
-        // To be safe and robust, let's just grab all streams and filter in PHP.
-        
-        $cmd = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#1" -show_entries "frame=side_data_list" -show_entries "stream=codec_type,width,height,codec_name,color_primaries,color_transfer,color_space" -i "%s" 2>&1',
+        // Command: Read 50 packets to ensure we catch Video frames for HDR data
+        $cmd = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -show_entries "stream=codec_type,width,height,codec_name,channels,color_primaries,color_transfer,color_space" -i "%s" 2>&1',
             Config::FFPROBE,
             $filePath
         );
@@ -37,51 +26,64 @@ class Probe
 
         if (!$data) return null;
 
-        // Initialize Defaults
+        // Parse Stream Info
         $width = 0; $height = 0; 
-        $primaries = null; $transfer = null; $space = null;
-        $audioCodec = 'opus'; // Default fallback
+        $primaries = null; 
+        
+        // Initialize to null so we can detect if we've found one stream yet
+        $audioCodec = null; 
+        $audioChannels = 0;
 
         // Iterate streams to find Video and Audio data
         if (isset($data->streams)) {
             foreach ($data->streams as $stream) {
-                if ($stream->codec_type === 'video') {
+                if (isset($stream->codec_type) && $stream->codec_type === 'video') {
                     $width = intval($stream->width ?? 0);
                     $height = intval($stream->height ?? 0);
                     $primaries = $stream->color_primaries ?? null;
-                } elseif ($stream->codec_type === 'audio') {
-                    // Capture the first audio stream we find
-                    if ($audioCodec === 'opus') { // Only set if not already set (detect first)
+                } elseif (isset($stream->codec_type) && $stream->codec_type === 'audio') {
+                    // Capture ONLY the first audio stream we encounter
+                    if ($audioCodec === null) { 
                         $audioCodec = $stream->codec_name ?? 'opus';
+                        $audioChannels = intval($stream->channels ?? 0);
                     }
                 }
             }
         }
 
-        // Get HDR Metadata from Frames
+        // Fallback default if NO audio stream was found
+        if ($audioCodec === null) {
+            $audioCodec = 'opus';
+        }
+
+        // Parse Frame Info (Iterate to find HDR Metadata)
         $hdrString = null;
-        if (!empty($data->frames[0]->side_data_list)) {
-            foreach ($data->frames[0]->side_data_list as $sd) {
-                if (isset($sd->side_data_type) && $sd->side_data_type === "Mastering display metadata") {
-                    $hdrString = self::formatMasteringString($sd);
-                    break;
+        if (!empty($data->frames)) {
+            foreach ($data->frames as $frame) {
+                if (!empty($frame->side_data_list)) {
+                    foreach ($frame->side_data_list as $sd) {
+                        if (isset($sd->side_data_type) && $sd->side_data_type === "Mastering display metadata") {
+                            $hdrString = self::formatMasteringString($sd);
+                            break 2; 
+                        }
+                    }
                 }
             }
         }
 
         return [
-            'width'       => $width,
-            'height'      => $height,
-            'is_hdr'      => ($hdrString !== null),
-            'hdr_mastering' => $hdrString,
-            'primaries'   => $primaries,
-            'audio_codec' => $audioCodec
+            'width'          => $width,
+            'height'         => $height,
+            'is_hdr'         => ($hdrString !== null),
+            'hdr_mastering'  => $hdrString,
+            'primaries'      => $primaries,
+            'audio_codec'    => $audioCodec,
+            'audio_channels' => $audioChannels
         ];
     }
 
     private static function formatMasteringString($sd) {
         $get = fn($val) => explode('/', $val ?? '0')[0];
-        // ... (Same logic as before) ...
         $gx = $get($sd->green_x ?? null); $gy = $get($sd->green_y ?? null);
         $bx = $get($sd->blue_x ?? null);  $by = $get($sd->blue_y ?? null);
         $rx = $get($sd->red_x ?? null);   $ry = $get($sd->red_y ?? null);
