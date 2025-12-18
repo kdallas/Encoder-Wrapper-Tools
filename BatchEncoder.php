@@ -255,12 +255,14 @@ class BatchEncoder
 
         $videoBat = $this->jobPath . $this->prefixInput . '_vid.ps1';
         $audioBat = $this->jobPath . $this->prefixInput . '_aud.ps1';
+        $subBat   = $this->jobPath . $this->prefixInput . '_sub.ps1';
         $mergeBat = $this->jobPath . $this->prefixInput . '_mux.ps1';
         $cleanBat = $this->jobPath . $this->prefixInput . '_del.ps1';
 
         // Reset output files
         if(file_exists($videoBat)) unlink($videoBat);
         if(file_exists($audioBat)) unlink($audioBat);
+        if(file_exists($subBat))   unlink($subBat);
         if(file_exists($mergeBat)) unlink($mergeBat);
         if(file_exists($cleanBat)) unlink($cleanBat);
 
@@ -278,7 +280,8 @@ class BatchEncoder
                 $probeData = [
                     'width' => 1920, 'height' => 1080, 'video_codec' => 'unknown', 
                     'is_hdr' => false, 'primaries' => null,
-                    'audio_codec' => 'opus', 'audio_channels' => 0
+                    'audio_codec' => 'opus', 'audio_channels' => 0,
+                    'has_chapters' => false, 'subtitles' => [],
                 ];
             }
 
@@ -292,6 +295,64 @@ class BatchEncoder
             }
             echo "    Audio: {$probeData['audio_codec']} ({$probeData['audio_channels']}ch)\n";
             // -----------------------------
+
+            // --- SUBTITLE & CHAPTER LOGIC ---
+            $subJobs = "";
+            $subInputs = "";
+            $subMaps   = "";
+            $subClean  = "";
+            
+            // Input Index Tracker for Muxer
+            // 0=Video (PreMux), 1=Audio (OutAud)
+            $nextMuxIndex = 2; 
+
+            // Chapter Logic (Map from Source)
+            $chapterMapArgs = "";
+            if ($probeData['has_chapters']) {
+                // Add Source File as Input to Muxer just for chapters
+                $subInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
+                
+                // Map chapters from this input (Index 2 usually)
+                $chapterMapArgs = " -map_chapters $nextMuxIndex";
+                
+                $nextMuxIndex++; // Increment index
+                echo "  [Chapter]: Mapping directly from Source.\n";
+            }
+
+            // Subtitle Logic
+            foreach ($probeData['subtitles'] as $sub) {
+                // Filter: Lang = English
+                $isEng = in_array(strtolower($sub['lang']), ['eng', 'en', 'en-us']);
+                // Filter: Not Hearing Impaired (SDH)
+                $isSDH = ($sub['sdh'] == 1) || (stripos($sub['title'], 'sdh') !== false);
+                
+                if ($isEng && !$isSDH) {
+                    $suffix = "_" . $sub['lang'];
+                    if ($sub['forced']) $suffix .= "_forced";
+
+                    // Append Track Index to ensure Uniqueness (e.g. _eng_3.mkv)
+                    $suffix .= "_" . $sub['index'];
+
+                    // Extract to temp MKV (Safest for PGS/ASS/SRT)
+                    $subOut = $this->wrkPath . $this->swapExt($fileName, 'mkv', $suffix);
+                    
+                    // FIX: Added -map_chapters -1 to prevent chapters in sub file
+                    $subJobs .= sprintf('%s -i "%s" -map 0:%d -c copy -map_chapters -1 "%s"' . "\n",
+                        $this->toWinPath(Config::AUD_ENC),
+                        $this->toWinPath($cleanPath),
+                        $sub['index'],
+                        $this->toWinPath($subOut)
+                    );
+
+                    // Add to Muxer
+                    $subInputs .= sprintf(' -i "%s"', $this->toWinPath($subOut));
+                    $subMaps   .= sprintf(' -map %d:0', $nextMuxIndex);
+                    $subClean  .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($subOut));
+                    $nextMuxIndex++;
+
+                    echo "  [Subtitle]: Keeping Track {$sub['index']} ({$sub['lang']}" . ($sub['forced']?' Forced':'') . ")\n";
+                }
+            }
 
             // --- SMART AUDIO LOGIC START ---
             $activeProfile = $this->audioProfileKey;
@@ -438,17 +499,20 @@ class BatchEncoder
 
             // Pre-Mux (Video only into MKV)
             $preMxJob = sprintf('%s -o "%s" "%s"' . "\n", 
-                $this->toWinPath(Config::MKV_MRG), 
+                $this->toWinPath(Config::MKV_MRG),
                 $this->toWinPath($preMux), 
                 $this->toWinPath($outVid)
             );
 
-            // Muxer (Audio + Video)
-            $muxerJob = sprintf('%s -i "%s" -i "%s" %s "%s"' . "\n", 
-                $this->toWinPath(Config::MKV_MUX), 
-                $this->toWinPath($preMux), 
-                $this->toWinPath($outAud), 
-                $mergeOptions, 
+            // Muxer (Video + Audio + Source[Chapters?] + Subs)
+            $baseMuxMap = "-c copy -map 0:v:0 -map 1:a:0 $chapterMapArgs $subMaps";
+
+            $muxerJob = sprintf('%s -i "%s" -i "%s"%s %s "%s"' . "\n", 
+                $this->toWinPath(Config::MKV_MUX),
+                $this->toWinPath($preMux),
+                $this->toWinPath($outAud),
+                $subInputs,   // -i Source (if chapters) + -i sub1.mkv...
+                $baseMuxMap,  // -map 0... -map 1... -map_chapters 2 ...
                 $this->toWinPath($finMkv)
             );
 
@@ -456,6 +520,7 @@ class BatchEncoder
             $cleanJob  = sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outVid));
             $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outAud));
             $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($preMux));
+            $cleanJob .= $subClean;
 
             // Output to Screen (Display Windows style for user familiarity)
             $displaySrc = $this->toWinPath($cleanPath);
@@ -465,12 +530,13 @@ class BatchEncoder
             // Write to Files
             file_put_contents($videoBat, $videoJob, FILE_APPEND);
             file_put_contents($audioBat, $audioJob, FILE_APPEND);
+            file_put_contents($subBat,   $subJobs,  FILE_APPEND);
             file_put_contents($mergeBat, $preMxJob, FILE_APPEND);
             file_put_contents($mergeBat, $muxerJob, FILE_APPEND);
             file_put_contents($cleanBat, $cleanJob, FILE_APPEND);
         }
 
-        echo "\nDone. Created:\n- $videoBat\n- $audioBat\n- $mergeBat\n- $cleanBat\n";
+        echo "\nDone. Created:\n- $videoBat\n- $audioBat\n- $subBat\n- $mergeBat\n- $cleanBat\n";
     }
 
     private function swapExt($filename, $newExt, $suffix='') {

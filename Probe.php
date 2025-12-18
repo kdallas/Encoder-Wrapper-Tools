@@ -8,25 +8,22 @@ class Probe
             throw new Exception("ffprobe not found at: " . Config::FFPROBE);
         }
 
-        // Command: Read 50 packets to ensure we catch Video frames for HDR data
-        // Added -show_chapters
-        // Added "index,disposition,tags" to stream entries
-        $cmd = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -show_chapters -show_entries "stream=index,codec_type,width,height,codec_name,channels,color_primaries,color_transfer,color_space,disposition,tags" -i "%s" 2>&1',
-            Config::FFPROBE,
-            $filePath
+        // --- PASS 1: Metadata (Headers) ---
+        // FIX: We removed the restrictive "show_entries" filter for streams.
+        // We now use -show_streams -show_chapters to get EVERYTHING (including tags/language).
+        $cmd1 = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_chapters -show_streams -i "%s" 2>&1',
+            Config::FFPROBE, $filePath
         );
+        $data1 = self::getJsonOutput($cmd1);
 
-        $rawOutput = shell_exec($cmd);
-        
-        $first = strpos($rawOutput, '{');
-        $last  = strrpos($rawOutput, '}');
-        
-        if ($first === false || $last === false) return null;
-        
-        $json = substr($rawOutput, $first, ($last - $first + 1));
-        $data = json_decode($json);
+        // --- PASS 2: HDR Data (Packets) ---
+        // We scan 50 packets to find the Video Frame Side Data (Mastering Display Metadata).
+        $cmd2 = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -i "%s" 2>&1',
+            Config::FFPROBE, $filePath
+        );
+        $data2 = self::getJsonOutput($cmd2);
 
-        if (!$data) return null;
+        if (!$data1) return null; // Data1 is critical. Data2 is optional (HDR only).
 
         // Init
         $width = 0; $height = 0; 
@@ -36,9 +33,21 @@ class Probe
         $audioChannels = 0;
         $subtitles = [];
 
-        // Iterate streams
-        if (isset($data->streams)) {
-            foreach ($data->streams as $stream) {
+        // Helper: Case-insensitive property getter for Tags
+        $getTag = function($obj, $key) {
+            if (empty($obj) || !is_object($obj)) return null;
+            // Check exact match first
+            if (isset($obj->$key)) return $obj->$key;
+            // Check case-insensitive
+            foreach ($obj as $k => $v) {
+                if (strcasecmp($k, $key) === 0) return $v;
+            }
+            return null;
+        };
+
+        // Iterate streams (From Pass 1)
+        if (isset($data1->streams)) {
+            foreach ($data1->streams as $stream) {
                 if (isset($stream->codec_type)) {
                     if ($stream->codec_type === 'video') {
                         $width = intval($stream->width ?? 0);
@@ -55,13 +64,23 @@ class Probe
                     }
                     elseif ($stream->codec_type === 'subtitle') {
                         // Capture Subtitle Data
+                        $tags = $stream->tags ?? null;
+                        $disp = $stream->disposition ?? null;
+                        
+                        // Now that we have the full stream object, getTag will find 'language' or 'LANGUAGE'
+                        $lang = $getTag($tags, 'language') ?? 'und';
+                        $title = $getTag($tags, 'title') ?? '';
+                        
+                        $forced = isset($disp->forced) ? $disp->forced : 0;
+                        $sdh    = isset($disp->hearing_impaired) ? $disp->hearing_impaired : 0;
+
                         $subtitles[] = [
-                            'index' => $stream->index,
-                            'codec' => $stream->codec_name ?? 'unknown',
-                            'lang'  => $stream->tags->language ?? 'und',
-                            'title' => $stream->tags->title ?? '',
-                            'forced' => $stream->disposition->forced ?? 0,
-                            'sdh'    => $stream->disposition->hearing_impaired ?? 0
+                            'index'  => $stream->index,
+                            'codec'  => $stream->codec_name ?? 'unknown',
+                            'lang'   => $lang,
+                            'title'  => $title,
+                            'forced' => $forced,
+                            'sdh'    => $sdh
                         ];
                     }
                 }
@@ -73,13 +92,13 @@ class Probe
             $audioCodec = 'opus';
         }
 
-        // Check for Chapters
-        $hasChapters = !empty($data->chapters);
+        // Check for Chapters (From Pass 1)
+        $hasChapters = !empty($data1->chapters);
 
-        // Parse Frame Info (Iterate to find HDR Metadata)
+        // Parse HDR (From Pass 2)
         $hdrString = null;
-        if (!empty($data->frames)) {
-            foreach ($data->frames as $frame) {
+        if ($data2 && !empty($data2->frames)) {
+            foreach ($data2->frames as $frame) {
                 if (!empty($frame->side_data_list)) {
                     foreach ($frame->side_data_list as $sd) {
                         if (isset($sd->side_data_type) && $sd->side_data_type === "Mastering display metadata") {
@@ -103,6 +122,15 @@ class Probe
             'subtitles'      => $subtitles,
             'has_chapters'   => $hasChapters,
         ];
+    }
+
+    private static function getJsonOutput($cmd) {
+        $rawOutput = shell_exec($cmd);
+        $first = strpos($rawOutput, '{');
+        $last  = strrpos($rawOutput, '}');
+        if ($first === false || $last === false) return null;
+        $json = substr($rawOutput, $first, ($last - $first + 1));
+        return json_decode($json);
     }
 
     private static function formatMasteringString($sd) {
