@@ -2,14 +2,16 @@
 
 class Probe
 {
-    // Returns: ['width', 'height', 'video_codec', 'is_hdr', 'hdr_mastering', 'primaries', 'audio_codec', 'audio_channels']
+    // Returns: ['width', 'height', 'video_codec', 'is_hdr', 'hdr_mastering', 'primaries', 'audio_codec', 'audio_channels', 'subtitles' => [], 'chapters' => bool]
     public static function analyze($filePath) {
         if (!file_exists(Config::FFPROBE)) {
             throw new Exception("ffprobe not found at: " . Config::FFPROBE);
         }
 
         // Command: Read 50 packets to ensure we catch Video frames for HDR data
-        $cmd = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -show_entries "stream=codec_type,width,height,codec_name,channels,color_primaries,color_transfer,color_space" -i "%s" 2>&1',
+        // Added -show_chapters
+        // Added "index,disposition,tags" to stream entries
+        $cmd = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -show_chapters -show_entries "stream=index,codec_type,width,height,codec_name,channels,color_primaries,color_transfer,color_space,disposition,tags" -i "%s" 2>&1',
             Config::FFPROBE,
             $filePath
         );
@@ -26,28 +28,41 @@ class Probe
 
         if (!$data) return null;
 
-        // Parse Stream Info
+        // Init
         $width = 0; $height = 0; 
         $primaries = null; 
         $videoCodec = 'unknown';
-        
-        // Initialize to null so we can detect if we've found one stream yet
         $audioCodec = null; 
         $audioChannels = 0;
+        $subtitles = [];
 
-        // Iterate streams to find Video and Audio data
+        // Iterate streams
         if (isset($data->streams)) {
             foreach ($data->streams as $stream) {
-                if (isset($stream->codec_type) && $stream->codec_type === 'video') {
-                    $width = intval($stream->width ?? 0);
-                    $height = intval($stream->height ?? 0);
-                    $primaries = $stream->color_primaries ?? null;
-                    $videoCodec = $stream->codec_name ?? 'unknown'; // Capture Codec
-                } elseif (isset($stream->codec_type) && $stream->codec_type === 'audio') {
-                    // Capture ONLY the first audio stream we encounter
-                    if ($audioCodec === null) { 
-                        $audioCodec = $stream->codec_name ?? 'opus';
-                        $audioChannels = intval($stream->channels ?? 0);
+                if (isset($stream->codec_type)) {
+                    if ($stream->codec_type === 'video') {
+                        $width = intval($stream->width ?? 0);
+                        $height = intval($stream->height ?? 0);
+                        $primaries = $stream->color_primaries ?? null;
+                        $videoCodec = $stream->codec_name ?? 'unknown';
+                    } 
+                    elseif ($stream->codec_type === 'audio') {
+                        // Capture ONLY the first audio stream we encounter
+                        if ($audioCodec === null) { 
+                            $audioCodec = $stream->codec_name ?? 'opus';
+                            $audioChannels = intval($stream->channels ?? 0);
+                        }
+                    }
+                    elseif ($stream->codec_type === 'subtitle') {
+                        // Capture Subtitle Data
+                        $subtitles[] = [
+                            'index' => $stream->index,
+                            'codec' => $stream->codec_name ?? 'unknown',
+                            'lang'  => $stream->tags->language ?? 'und',
+                            'title' => $stream->tags->title ?? '',
+                            'forced' => $stream->disposition->forced ?? 0,
+                            'sdh'    => $stream->disposition->hearing_impaired ?? 0
+                        ];
                     }
                 }
             }
@@ -57,6 +72,9 @@ class Probe
         if ($audioCodec === null) {
             $audioCodec = 'opus';
         }
+
+        // Check for Chapters
+        $hasChapters = !empty($data->chapters);
 
         // Parse Frame Info (Iterate to find HDR Metadata)
         $hdrString = null;
@@ -81,7 +99,9 @@ class Probe
             'hdr_mastering'  => $hdrString,
             'primaries'      => $primaries,
             'audio_codec'    => $audioCodec,
-            'audio_channels' => $audioChannels
+            'audio_channels' => $audioChannels,
+            'subtitles'      => $subtitles,
+            'has_chapters'   => $hasChapters,
         ];
     }
 
