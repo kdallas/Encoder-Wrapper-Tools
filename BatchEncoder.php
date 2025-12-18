@@ -275,13 +275,45 @@ class BatchEncoder
             $probeData = Probe::analyze($cleanPath);
             if (!$probeData) {
                 echo "Warning: Could not analyze file $fileName. Using defaults.\n";
-                $probeData = ['width' => 1920, 'height' => 1080, 'is_hdr' => false, 'primaries' => null];
+                $probeData = [
+                    'width' => 1920, 'height' => 1080, 'is_hdr' => false, 'primaries' => null,
+                    'audio_codec' => 'opus', 'audio_channels' => 0
+                ];
             }
 
-            // Audio Logic
-            $audioExt = 'opus'; // Default for our encoding profiles
-        
-            if ($this->audioProfileKey === 'copy') {
+            // --- SMART AUDIO LOGIC START ---
+            $activeProfile = $this->audioProfileKey;
+            $srcCodec = strtolower($probeData['audio_codec'] ?? '');
+            $srcCh    = intval($probeData['audio_channels'] ?? 0);
+            
+            // Check for Smart Copy conditions (Opus source only)
+            if ($srcCodec === 'opus') {
+                if ($activeProfile === 'default') {
+                    // Default usually encodes, but if source is Opus, we prefer Copy
+                    $activeProfile = 'copy';
+                    echo "  [Smart Audio]: Source is Opus (Default Profile). Switched to Copy.\n";
+                }
+                elseif ($activeProfile === 'opus-5.1' && $srcCh === 6) {
+                    $activeProfile = 'copy';
+                    echo "  [Smart Audio]: Source is Opus 5.1. Switched to Copy.\n";
+                }
+                elseif ($activeProfile === 'opus-stereo' && $srcCh === 2) {
+                    $activeProfile = 'copy';
+                    echo "  [Smart Audio]: Source is Opus Stereo. Switched to Copy.\n";
+                }
+                elseif ($activeProfile === 'opus-pans' && $srcCh === 2) {
+                    // Pans profile is usually for downmixing. If source is already stereo, we copy.
+                    $activeProfile = 'copy';
+                    echo "  [Smart Audio]: Source is Opus Stereo (Pans Profile). Switched to Copy.\n";
+                }
+            }
+            // --- SMART AUDIO LOGIC END ---
+
+            // --- AUDIO EXECUTION LOGIC ---
+            $audioExt = 'opus'; // Default
+            $finalAudOpts = $this->finalAudOptions; // Default
+
+            if ($activeProfile === 'copy') {
                 // Map ffmpeg codec names to file extensions
                 $codecMap = [
                     'dts' => 'dts',
@@ -293,18 +325,19 @@ class BatchEncoder
                     'mp3' => 'mp3'
                 ];
 
-                $detected = strtolower($probeData['audio_codec'] ?? '');
-
-                if (array_key_exists($detected, $codecMap)) {
-                    $audioExt = $codecMap[$detected];
+                if (array_key_exists($srcCodec, $codecMap)) {
+                    $audioExt = $codecMap[$srcCodec];
                 } else {
                     // Fallback for unknown codecs (e.g. pcm_s16le), mka is safe for almost anything
-                    $audioExt = 'mka'; 
-                    echo "  [Audio]: Unknown source codec '$detected'. Defaulting to .mka\n";
+                    $audioExt = 'mka';
+                    echo "  [Audio]: Unknown source codec '$srcCodec'. Defaulting to .mka\n";
                 }
-                echo "  [Audio]: Copy mode detected. Source: $detected -> Ext: .$audioExt\n";
+                
+                // Override options for Copy Mode
+                $finalAudOpts = '-c:a copy';
+                echo "  [Audio]: Copy mode detected. Source: $srcCodec -> Ext: .$audioExt\n";
             } else {
-                echo "  [Audio]: Encoding to {$this->audioProfileKey}. Ext: .$audioExt\n";
+                echo "  [Audio]: Encoding to {$activeProfile}. Ext: .$audioExt\n";
             }
 
             // Video/Level Logic
@@ -337,7 +370,7 @@ class BatchEncoder
             }
 
             // BUILD JOBS
-            // 1. Calculate Outputs (Forward Slashes Internal)
+            // Calculate Outputs (Forward Slashes Internal)
             $outVid = $this->wrkPath . $this->swapExt($fileName, 'h265');
             $outAud = $this->wrkPath . $this->swapExt($fileName, $audioExt);
             $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
@@ -345,7 +378,7 @@ class BatchEncoder
 
             $currentVidOptions = $this->finalVidOptions . " --level $level $colorParams $hdrParams";
 
-            // 2. Format Commands (Use toWinPath() here for the Batch File content)
+            // Format Commands (Use toWinPath() here for the Batch File content)
             
             // Video
             $videoJob = sprintf('%s %s -i "%s" -o "%s"' . "\n", 
