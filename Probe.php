@@ -2,7 +2,7 @@
 
 class Probe
 {
-    // Returns: ['width', 'height', 'is_hdr', 'hdr_mastering', 'primaries', 'audio_codec', 'audio_channels']
+    // Returns: ['width', 'height', 'video_codec', 'is_hdr', 'hdr_mastering', 'primaries', 'audio_codec', 'audio_channels']
     public static function analyze($filePath) {
         if (!file_exists(Config::FFPROBE)) {
             throw new Exception("ffprobe not found at: " . Config::FFPROBE);
@@ -29,6 +29,7 @@ class Probe
         // Parse Stream Info
         $width = 0; $height = 0; 
         $primaries = null; 
+        $videoCodec = 'unknown';
         
         // Initialize to null so we can detect if we've found one stream yet
         $audioCodec = null; 
@@ -41,6 +42,7 @@ class Probe
                     $width = intval($stream->width ?? 0);
                     $height = intval($stream->height ?? 0);
                     $primaries = $stream->color_primaries ?? null;
+                    $videoCodec = $stream->codec_name ?? 'unknown'; // Capture Codec
                 } elseif (isset($stream->codec_type) && $stream->codec_type === 'audio') {
                     // Capture ONLY the first audio stream we encounter
                     if ($audioCodec === null) { 
@@ -74,6 +76,7 @@ class Probe
         return [
             'width'          => $width,
             'height'         => $height,
+            'video_codec'    => $videoCodec,
             'is_hdr'         => ($hdrString !== null),
             'hdr_mastering'  => $hdrString,
             'primaries'      => $primaries,

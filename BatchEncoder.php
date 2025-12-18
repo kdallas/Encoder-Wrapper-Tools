@@ -276,10 +276,22 @@ class BatchEncoder
             if (!$probeData) {
                 echo "Warning: Could not analyze file $fileName. Using defaults.\n";
                 $probeData = [
-                    'width' => 1920, 'height' => 1080, 'is_hdr' => false, 'primaries' => null,
+                    'width' => 1920, 'height' => 1080, 'video_codec' => 'unknown', 
+                    'is_hdr' => false, 'primaries' => null,
                     'audio_codec' => 'opus', 'audio_channels' => 0
                 ];
             }
+
+            // --- REPORT SOURCE ANALYSIS ---
+            echo "  [Source Report]:\n";
+            echo "    Video: {$probeData['width']}x{$probeData['height']} ({$probeData['video_codec']})\n";
+            if ($probeData['is_hdr']) {
+                echo "    HDR:   Yes [{$probeData['hdr_mastering']}]\n";
+            } else {
+                echo "    HDR:   No\n";
+            }
+            echo "    Audio: {$probeData['audio_codec']} ({$probeData['audio_channels']}ch)\n";
+            // -----------------------------
 
             // --- SMART AUDIO LOGIC START ---
             $activeProfile = $this->audioProfileKey;
@@ -316,13 +328,32 @@ class BatchEncoder
             if ($activeProfile === 'copy') {
                 // Map ffmpeg codec names to file extensions
                 $codecMap = [
-                    'dts' => 'dts',
-                    'ac3' => 'ac3',
-                    'eac3' => 'eac3',
-                    'aac' => 'aac',
-                    'flac' => 'flac',
-                    'truehd' => 'thd',
-                    'mp3' => 'mp3'
+                    // --- Dolby ---
+                    'ac3'         => 'ac3',   // Standard Dolby Digital
+                    'eac3'        => 'eac3',  // Dolby Digital Plus (DDP) & Atmos
+                    'mlp'         => 'thd',   // Meridian Lossless (TrueHD Core)
+                    'truehd'      => 'thd',   // Dolby TrueHD & Atmos
+
+                    // --- DTS ---
+                    'dts'         => 'dts',   // Covers DTS, DTS-ES, DTS-HD HR, DTS-HD MA, and DTS:X
+
+                    // --- Lossless / High Fidelity ---
+                    'alac'        => 'm4a',   // Apple Lossless
+                    'ape'         => 'ape',   // Monkey's Audio
+                    'flac'        => 'flac',
+                    'pcm_s16le'   => 'wav',
+                    'pcm_s24le'   => 'wav',
+                    'pcm_f32le'   => 'wav',
+                    'pcm_bluray'  => 'wav',
+                    'wavpack'     => 'wv',
+
+                    // --- Standard / Legacy ---
+                    'aac'         => 'aac',
+                    'mp2'         => 'mp2',   // Common in DVDs/Broadcast
+                    'mp3'         => 'mp3',
+                    'opus'        => 'opus',
+                    'vorbis'      => 'ogg',   // Common in older MKVs
+                    'wmav2'       => 'wma',   // Windows Media Audio
                 ];
 
                 if (array_key_exists($srcCodec, $codecMap)) {
