@@ -2,7 +2,7 @@
 
 This readme provides a comprehensive overview of the PHP-based batch video encoding system designed to automate high-quality HEVC/Opus transcoding.
 
-#
+
 
 ## **Features**
 
