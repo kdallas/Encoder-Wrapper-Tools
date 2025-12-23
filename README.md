@@ -60,20 +60,20 @@ Run the application from the terminal using the following syntax:
 
 | **Argument** | **Description** |
 | --- | --- |
-| \--path | **Required.** The path to a single file or a directory to scan. |
+| `--path` | **Required.** The path to a single file or a directory to scan. |
 |   | The source file or directory to process. Accepts standard Windows paths (`C:\`) or Git Bash style (`/c/`). |
-| \--prefix | **Required.** Sets the filename prefix for the generated .ps1 job files. |
+| `--prefix` | **Required.** Sets the filename prefix for the generated .ps1 job files. |
 |   | A unique name for this batch job. Used to name the output `.ps1` files. |
-| \--recursive | Enables recursive scanning of subdirectories for MKV/MP4 files. |
-| \--video | Selects the video profile (e.g., `2pass`, `cqp`). |
+| `--recursive` | Enables recursive scanning of subdirectories for MKV/MP4 files. |
+| `--video` | Selects the video profile (e.g., `2pass`, `cqp`). |
 |   | The video profile key to use (see Profiles). Default: `default`. |
-| \--audio | Selects the audio profile to use (e.g., opus-5.1, opus-stereo). Default: `default`. |
-| \--resize | Resizes the output video (Format: `WxH`, e.g., `--resize=1920x1080`). |
-| \--crop | Crops the input video (Format: `Left,Top,Right,Bottom`, e.g., `--crop=0,140,0,140`). |
-| \--vpp | Apply hardware video pre-processing filters (`edge`, `deband`, `both`, `none`). |
-| \--q | Sets the constant quality value for the cqp video profile. |
+| `--audio` | Selects the audio profile to use (e.g., opus-5.1, opus-stereo). Default: `default`. |
+| `--resize` | Resizes the output video (Format: `WxH`, e.g., `--resize=1920x1080`). |
+| `--crop` | Crops the input video (Format: `Left,Top,Right,Bottom`, e.g., `--crop=0,140,0,140`). |
+| `--vpp` | Apply hardware video pre-processing filters (`edge`, `deband`, `both`, `none`). |
+| `--q` | Sets the constant quality value for the cqp video profile. |
 |   | Overrides the CQP/Quality value defined in the profile (e.g., `--q=18`). |
-| \--bitrate | Sets the target bitrate for the 2pass video profile. |
+| `--bitrate` | Sets the target bitrate for the 2pass video profile. |
 
 ## **Profiles**
 
