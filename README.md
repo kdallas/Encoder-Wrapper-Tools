@@ -94,27 +94,32 @@ Run the application from the terminal using the following syntax:
 
 ## **Example Commands**
 
-**Note:** Assuming your run.php is set to executable (`chmod +x run.php`), or substitute the commands with: `php run.php` below.
+**Note:** Assuming your `run.php` is set to executable (`chmod +x run.php`), or substitute the commands with: `php run.php` below.
 
-720p Encode (from higher resolution source):
+**720p Encode (from higher resolution source):**
 ```sh
 ./run.php --path="C:/Movies/MyMovie.mkv" --prefix=MyMovie --video=2pass --resize=1280x720
 ```
 
-High-Quality Recursive Batch:
-
+**High-Quality Recursive Batch:**
 ```sh
 ./run.php --path="D:/TV/ShowName" --prefix=ShowName --video=cqp --q=18 --recursive
 ```
 
-Cropped Movie with Debanding:
+**Cropped Movie with Debanding:**
 ```sh
 ./run.php --path="C:/Files/Movie.mkv" --prefix=Clipped --crop=0,140,0,140 --vpp=deband
 ```
 
-TV Show using Linux path:
+**TV Show using Linux path:**
 ```sh
 ./run.php --path="/e/Downloads/TV_Show/" --prefix="Season1"
+```
+
+**Anime / Animation**
+```sh
+./run.php --path="/e/Anime/Series/" --prefix="AnimeBatch" --video=balanced --vpp=deband --audio=opus-stereo --recursive
+```
 
 ## **Output**
 
@@ -125,3 +130,17 @@ Upon completion, the application generates five PowerShell scripts in the job di
 - **\[Prefix\]\_sub.ps1**: Extracts and prepares subtitle files.
 - **\[Prefix\]\_mux.ps1**: Merges video, audio, subs, and chapters into the final MKV.
 - **\[Prefix\]\_del.ps1**: Cleans up all intermediate temporary files.
+
+## **Workflow**
+
+You can run these sequentially or in parallel (e.g., run `_vid` and `_aud` at the same time).
+
+```sh
+./Prefix_vid.ps1
+./Prefix_aud.ps1
+./Prefix_sub.ps1
+# Wait for above to finish
+./Prefix_mux.ps1
+# Verify file, then clean up
+./Prefix_del.ps1
+```
