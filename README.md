@@ -1,4 +1,4 @@
-# **Batch Video Encoder**
+# **Batch Video Encoder Wrapper Tools**
 
 This readme provides a comprehensive overview of the PHP-based batch video encoding system designed to automate high-quality HEVC/Opus transcoding.
 
@@ -98,17 +98,17 @@ Run the application from the terminal using the following syntax:
 
 **720p Encode (from higher resolution source):**
 ```sh
-./run.php --path="C:/Movies/MyMovie.mkv" --prefix=MyMovie --video=2pass --resize=1280x720
+./run.php --path="C:\Movies\MyMovie.mkv" --prefix=MyMovie --video=2pass --resize=1280x720
 ```
 
 **High-Quality Recursive Batch:**
 ```sh
-./run.php --path="D:/TV/ShowName" --prefix=ShowName --video=cqp --q=18 --recursive
+./run.php --path="D:\TV\ShowName" --prefix=ShowName --video=cqp --q=18 --recursive
 ```
 
 **Cropped Movie with Debanding:**
 ```sh
-./run.php --path="C:/Files/Movie.mkv" --prefix=Clipped --crop=0,140,0,140 --vpp=deband
+./run.php --path="C:\Files\Movie.mkv" --prefix=Clipped --crop=0,140,0,140 --vpp=deband
 ```
 
 **TV Show using Linux path:**
