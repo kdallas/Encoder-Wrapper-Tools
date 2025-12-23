@@ -32,34 +32,23 @@ The system is configured via Config.php. Ensure the following paths are correct 
 
 Run the application from the terminal using the following syntax:
 
-Bash
-
-./run.php --path="\[Source Path\]" --prefix="\[Output Name\]" \[Options\]  
+```bash
+./run.php --path="\[Source Path\]" --prefix="\[Output Name\]" \[Options\]
+```
 
 ## **Core Arguments**
 
 | **Argument** | **Description** |
-| --- | --- |
 | \--path | **Required.** The path to a single file or a directory to scan. |
-| --- | --- |
 | \--prefix | **Required.** Sets the filename prefix for the generated .ps1 job files. |
-| --- | --- |
 | \--recursive | Enables recursive scanning of subdirectories. |
-| --- | --- |
 | \--video | Selects the video profile (e.g., 2pass, cqp). |
-| --- | --- |
 | \--audio | Selects the audio profile (e.g., opus-5.1, opus-stereo). |
-| --- | --- |
 | \--resize | Resizes the output (format: WxH, e.g., 1920x1080). |
-| --- | --- |
 | \--crop | Crops the video (format: L,T,R,B). |
-| --- | --- |
 | \--vpp | Applies filters: none, deband, edge, or both. |
-| --- | --- |
 | \--q | Sets the constant quality value for the cqp video profile. |
-| --- | --- |
 | \--bitrate | Sets the target bitrate for the 2pass video profile. |
-| --- | --- |
 
 ## **Profiles**
 
@@ -78,16 +67,20 @@ Bash
 ## **Example Commands**
 
 Standard 720p Encode:
-
+```sh
 ./run.php --path="C:/Movies/MyMovie.mkv" --prefix=MyMovie --video=2pass --resize=1280x720
+```
 
 High-Quality Recursive Batch:
 
+```sh
 ./run.php --path="D:/TV/ShowName" --prefix=ShowName --video=cqp --q=18 --recursive
+```
 
 Cropped Movie with Debanding:
-
+```sh
 ./run.php --path="C:/Files/Movie.mkv" --prefix=Clipped --crop=0,140,0,140 --vpp=deband
+```
 
 ## **Output**
 
