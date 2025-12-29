@@ -6,6 +6,11 @@ A robust, configurable batch encoding automation tool written in PHP. It generat
 
 It automates the complex chain of **Video Encoding** (NVEnc/HEVC), **Audio Processing** (Smart Copy/Opus/AAC), **Subtitle Extraction**, **Chapter Preservation**, and final **Muxing**.
 
+<br>
+
+---
+<br>
+
 ## **Features**
 
 - **Batch & Recursive Processing**: Automatically scans directories for .mkv and .mp4 files, with optional recursive subdirectory support.
@@ -17,13 +22,17 @@ It automates the complex chain of **Video Encoding** (NVEnc/HEVC), **Audio Proce
 - **Git Bash / Windows Friendly:** Accepts paths in both Windows (`C:\Path`) and Git Bash (`/c/Path`) formats.
 - **Video Post-Processing (VPP)**: Built-in support for debanding and edge-leveling filters.
 
+<br>
+
 ## **Requirements**
 
-- **PHP 8.0+ (CLI)**: Required to execute the runner script.
-- **NVEncC**: Used for hardware-accelerated HEVC video encoding.
-- **FFmpeg & FFprobe**: Required for audio encoding, stream analysis, and muxing.
-- **MKVToolNix**: (`mkvmerge`) Used for initial video-only stream packaging.
-- **Windows PowerShell**: Required to execute the generated .ps1 batch files.
+- **PHP 8.0+ (CLI)**: Required to execute the runner script: [PHP for Windows](https://windows.php.net/download/).
+- **NVEncC**: Used for GPU hardware-accelerated HEVC video encoding: [Rigaya NVEnc](https://github.com/rigaya/NVEnc/releases).
+- **FFmpeg & FFprobe**: Required for audio encoding, stream analysis, and muxing: [Gyan builds](https://www.gyan.dev/ffmpeg/builds/).
+- **MKVToolNix**: (`mkvmerge`) Used for initial video-only stream packaging: [MKVToolNix](https://mkvtoolnix.download/downloads.html#windows).
+- **Windows PowerShell**: Required to execute the generated `.ps1` batch files.
+
+<br>
 
 ## **Configuration**
 
@@ -48,6 +57,8 @@ class Config
 }
 ```
 
+<br>
+
 ## **Usage**
 
 Run the application from the terminal using the following syntax:
@@ -62,18 +73,18 @@ Run the application from the terminal using the following syntax:
 | --- | --- |
 | `--path` | **Required.** The path to a single file or a directory to scan. |
 |   | The source file or directory to process. Accepts standard Windows paths (`C:\`) or Git Bash style (`/c/`). |
-| `--prefix` | **Required.** Sets the filename prefix for the generated .ps1 job files. |
+| `--prefix` | **Required.** Sets the filename prefix for the generated `.ps1` job files. |
 |   | A unique name for this batch job. Used to name the output `.ps1` files. |
-| `--recursive` | Enables recursive scanning of subdirectories for MKV/MP4 files. |
+| `--recursive` | Enables recursive scanning of subdirectories for `.MKV`/`.MP4` files. |
 | `--video` | Selects the video profile (e.g., `2pass`, `cqp`). |
-|   | The video profile key to use (see Profiles). Default: `default`. |
-| `--audio` | Selects the audio profile to use (e.g., opus-5.1, opus-stereo). Default: `default`. |
+|   | The video profile key to use (see **Profiles**). Default: `default`. |
+| `--audio` | Selects the audio profile to use (e.g., `opus-5.1`, `opus-stereo`). Default: `default`. |
 | `--resize` | Resizes the output video (Format: `WxH`, e.g., `--resize=1920x1080`). |
 | `--crop` | Crops the input video (Format: `Left,Top,Right,Bottom`, e.g., `--crop=0,140,0,140`). |
 | `--vpp` | Apply hardware video pre-processing filters (`edge`, `deband`, `both`, `none`). |
 | `--q` | Sets the constant quality value for the cqp video profile. |
 |   | Overrides the CQP/Quality value defined in the profile (e.g., `--q=18`). |
-| `--bitrate` | Sets the target bitrate for the 2pass video profile. |
+| `--bitrate` | Sets the target bitrate (Kbps) for the 2pass video profile (e.g., `--bitrate=2000`). |
 
 ## **Profiles**
 
@@ -84,13 +95,17 @@ Run the application from the terminal using the following syntax:
 
 ### **Audio Profiles**
 
+- **opus-8-6**: Downmixes 7.1 source and encodes to 5.1 channel Opus at 320Kb VBR (better than AC3 640Kb).
 - **opus-5.1**: Encodes to 5.1 channel Opus at 224Kb.
 - **opus-pans**: Downmixes multi-channel audio to stereo at 128Kb with a volume boost for the center channel.
 - **opus-stereo**: Encodes to 2.0 channel Opus at 100Kb.
 - **copy**: Directly copies the source audio stream (pass-through).
 - **default**: Attempts to encode to Opus 5.1 (Surround) or Stereo depending on source at 192Kb.
 
-**Smart Copy Note:** If you select `default` or `opus-stereo`, but the source file is **already** in that format (e.g., source is Opus 2.0 and you requested `opus-stereo`), the script will automatically switch to **Copy Mode** to prevent quality loss.  Similarly, if the source is AAC and the number of channels isn't changing from 5.1 to 2.0 -- then **Copy Mode** is used.  This is due to the performance of AAC and Opus being comparable for little yielded improvement in compression.
+### **Smart Copy Notes**
+- If you select `default` or `opus-stereo`, but the source file is **already** in that format (e.g., source is Opus 2.0 and you requested `opus-stereo`), the script will automatically switch to **Copy Mode** to prevent quality loss.
+- Both "upmix" and downmix checks ensure the source and target aren't the same channel layout or trying to increase channels (e.g. 2.0 to 5.1).
+- Similarly, if the source is AAC and the number of channels isn't changing from 5.1 to 2.0 -- then **Copy Mode** is used. This is due to the performance of AAC and Opus being comparable for little yielded improvement in compression.
 
 ## **Example Commands**
 
@@ -121,6 +136,11 @@ Run the application from the terminal using the following syntax:
 ./run.php --path="/e/Anime/Series/" --prefix="AnimeBatch" --video=balanced --vpp=deband --audio=opus-stereo --recursive
 ```
 
+**Default Video Encode (vbrhq 1200) with 7.1 to 5.1 Downmix:**
+```sh
+./run.php --path="C:\Movies\MyMovie.mkv" --prefix=MyMovie --audio=opus-8-6
+```
+
 ## **Output**
 
 Upon completion, the application generates five PowerShell scripts in the job directory:
@@ -133,7 +153,7 @@ Upon completion, the application generates five PowerShell scripts in the job di
 
 ## **Workflow**
 
-You can run these sequentially or in parallel (e.g., run `_vid` and `_aud` at the same time).
+You can run the first 3 jobs sequentially or in parallel (e.g., run `_vid` and `_aud` at the same time).
 
 ```sh
 ./Prefix_vid.ps1
@@ -144,3 +164,16 @@ You can run these sequentially or in parallel (e.g., run `_vid` and `_aud` at th
 # Verify file, then clean up
 ./Prefix_del.ps1
 ```
+
+<br>
+
+---
+<br>
+
+## **Why? aka quick history...**
+
+Yes, there are many great wrapper tools already for encoding and multiplexing! Handbrake is a good example. I started using NVEnc as a CLI tool long before thinking about encoding audio. For me it was only about taking old media that was typically in H.264 (but occupied a lot of storage) and trying to get those file sizes down without any perceptual loss in quality.
+
+NVEnc was the first time I had seen the potential for leveraging my Nvidia GPU for video transcoding whilst really tweaking the params -- and I was blown away by its performance. Initially the quality wasn't as good for equal bitrates compared with pure CPU-based encodes (which is a complicated topic), but current iterations of cards with huge arrays of CUDA cores has made it possible to transcode in minutes what used to take several hours. So any meagre quality differences aside, the encode times make it all worth it.
+
+Naturally using this tool in isolation meant having to re-mux the source audio manually into a new MKV.  Once I started encoding whole directories of content, it was becoming tiresome. But I didn't want to lose all the preset parameters I'd been using or try to shoehorn them into another wrapper tool.  Naturally this evolved to batch files, manually created, then eventually crudely automated into a single CLI script with fixed hand-coded params. Written in PHP since it's my daily driver, (if you want to fork and migrate to Python or a Bash script -- knock yourself out).

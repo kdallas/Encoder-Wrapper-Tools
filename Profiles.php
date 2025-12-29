@@ -18,6 +18,10 @@ class Profiles
 
     public static function getAudio() {
         return [
+            'opus-8-6' => function($args) {
+                $ab = $args['abitrate'] ?? $args['bitaud'] ?? '320k';
+                return "-c:a libopus -b:a $ab " . '-vbr on -ac 6 -af "pan=5.1|FL=FL+0.5*BL+0.5*LFE|FR=FR+0.5*BR+0.5*LFE|FC=FC|BL=0.5*BL+0.5*LFE|BR=0.5*BR+0.5*LFE"';
+            },
             'opus-5.1' => function($args) {
                 $ab = $args['abitrate'] ?? $args['bitaud'] ?? '224k';
                 return "-c:a libopus -b:a $ab " . '-af "channelmap=channel_layout=5.1"';

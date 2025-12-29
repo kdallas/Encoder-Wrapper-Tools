@@ -358,7 +358,13 @@ class BatchEncoder
             $activeProfile = $this->audioProfileKey;
             $srcCodec = strtolower($probeData['audio_codec'] ?? '');
             $srcCh    = intval($probeData['audio_channels'] ?? 0);
-            
+
+            // SANITY CHECK: Prevent upmixing Stereo to 5.1 (opus-8-6)
+            if ($activeProfile === 'opus-8-6' && $srcCh <= 2) {
+                echo "  [Smart Audio]: Profile 'opus-8-6' selected but source is Stereo. Switching to 'opus-stereo'.\n";
+                $activeProfile = 'opus-stereo';
+            }
+
             // Check for Smart Copy conditions (Opus source only)
             if ($srcCodec === 'opus') {
                 if ($activeProfile === 'default') {
@@ -366,7 +372,7 @@ class BatchEncoder
                     $activeProfile = 'copy';
                     echo "  [Smart Audio]: Source is Opus (Default Profile). Switched to Copy.\n";
                 }
-                elseif ($activeProfile === 'opus-5.1' && $srcCh === 6) {
+                elseif (($activeProfile === 'opus-5.1' || $activeProfile === 'opus-8-6') && $srcCh === 6) {
                     $activeProfile = 'copy';
                     echo "  [Smart Audio]: Source is Opus 5.1. Switched to Copy.\n";
                 }
@@ -381,13 +387,17 @@ class BatchEncoder
                 }
             } 
             elseif ($srcCodec === 'aac') {
-                // Rule: Copy AAC unless downmixing (e.g. 5.1 to Stereo)
-                $isDownmix = ($srcCh > 2) && ($activeProfile === 'opus-stereo' || $activeProfile === 'opus-pans');
-                
+                // Rule: Copy AAC unless downmixing (5.1->Stereo OR 7.1->5.1)
+                $isDownmix = (($srcCh > 2) && ($activeProfile === 'opus-stereo' || $activeProfile === 'opus-pans'))
+                          || (($srcCh > 6) && ($activeProfile === 'opus-8-6'));
+
                 if (!$isDownmix) {
                     $activeProfile = 'copy';
                     echo "  [Smart Audio]: Source is AAC (No Downmix). Switched to Copy.\n";
                 }
+            }
+            elseif ($activeProfile === 'opus-8-6' && $srcCh > 6) {
+                echo "  [Smart Audio]: Source is $srcCodec ($srcCh channels). Will downmix to 5.1 Opus.\n";
             }
             // --- SMART AUDIO LOGIC END ---
 
