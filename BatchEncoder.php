@@ -26,8 +26,8 @@ class BatchEncoder
     public function __construct($argv) {
         try {
             // Initialize Defaults (Sanitized immediately)
-            $this->wrkPath = $this->sanitizePath(Config::DEFAULT_WRK_PATH, true);
-            $this->jobPath = $this->sanitizePath(Config::DEFAULT_JOB_PATH, true);
+            $this->wrkPath = $this->sanitizePath(Config::get('DEFAULT_WRK_PATH'), true);
+            $this->jobPath = $this->sanitizePath(Config::get('DEFAULT_JOB_PATH'), true);
 
             $this->parseArguments($argv);
             $this->validateInputs();
@@ -62,6 +62,11 @@ class BatchEncoder
         if (preg_match('/^\/([a-zA-Z])\/(.*)/', $clean, $matches)) {
             $drive = strtoupper($matches[1]);
             $clean = $drive . ':/' . $matches[2];
+        }
+
+        if (!$isDir) {
+            // Let's be sure this is not a directory
+            $isDir = is_dir($clean);
         }
 
         // 3. Trailing Slash Logic (only for directories)
@@ -225,10 +230,8 @@ class BatchEncoder
             return [$targetPath];
         } 
         elseif (is_dir($targetPath)) {
-            // Ensure trailing slash for directory scanning
-            if (!str_ends_with($targetPath, '/')) {
-                $targetPath .= '/';
-            }
+            // Remove any trailing slashes since ScanDir adds DIRECTORY_SEPARATOR
+            $targetPath = rtrim($targetPath, ' /\\');
 
             echo "Scanning: $targetPath (Recursive: " . ($this->recursive ? 'ON' : 'OFF') . ")\n";
             $scanned = ScanDir::scan($targetPath, $srcExts, $this->recursive);
@@ -338,7 +341,7 @@ class BatchEncoder
                     
                     // FIX: Added -map_chapters -1 to prevent chapters in sub file
                     $subJobs .= sprintf('%s -i "%s" -map 0:%d -c copy -map_chapters -1 "%s"' . "\n",
-                        $this->toWinPath(Config::AUD_ENC),
+                        $this->toWinPath(Config::get('AUD_ENC')),
                         $this->toWinPath($cleanPath),
                         $sub['index'],
                         $this->toWinPath($subOut)
@@ -493,7 +496,7 @@ class BatchEncoder
             
             // Video
             $videoJob = sprintf('%s %s -i "%s" -o "%s"' . "\n", 
-                $this->toWinPath(Config::VID_ENC), 
+                $this->toWinPath(Config::get('VID_ENC')),
                 $currentVidOptions, 
                 $this->toWinPath($cleanPath), 
                 $this->toWinPath($outVid)
@@ -501,7 +504,7 @@ class BatchEncoder
 
             // Audio
             $audioJob = sprintf('%s -i "%s" %s "%s"' . "\n", 
-                $this->toWinPath(Config::AUD_ENC), 
+                $this->toWinPath(Config::get('AUD_ENC')), 
                 $this->toWinPath($cleanPath), 
                 $this->finalAudOptions, 
                 $this->toWinPath($outAud)
@@ -509,7 +512,7 @@ class BatchEncoder
 
             // Pre-Mux (Video only into MKV)
             $preMxJob = sprintf('%s -o "%s" "%s"' . "\n", 
-                $this->toWinPath(Config::MKV_MRG),
+                $this->toWinPath(Config::get('MKV_MRG')),
                 $this->toWinPath($preMux), 
                 $this->toWinPath($outVid)
             );
@@ -518,7 +521,7 @@ class BatchEncoder
             $baseMuxMap = "-c copy -map 0:v:0 -map 1:a:0 $chapterMapArgs $subMaps";
 
             $muxerJob = sprintf('%s -i "%s" -i "%s"%s %s "%s"' . "\n", 
-                $this->toWinPath(Config::MKV_MUX),
+                $this->toWinPath(Config::get('MKV_MUX')),
                 $this->toWinPath($preMux),
                 $this->toWinPath($outAud),
                 $subInputs,   // -i Source (if chapters) + -i sub1.mkv...

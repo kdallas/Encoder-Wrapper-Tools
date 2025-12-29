@@ -4,22 +4,24 @@ class Probe
 {
     // Returns: ['width', 'height', 'video_codec', 'is_hdr', 'hdr_mastering', 'primaries', 'audio_codec', 'audio_channels', 'subtitles' => [], 'chapters' => bool]
     public static function analyze($filePath) {
-        if (!file_exists(Config::FFPROBE)) {
-            throw new Exception("ffprobe not found at: " . Config::FFPROBE);
+        $ffprobe = Config::get('FFPROBE');
+
+        if (!file_exists($ffprobe)) {
+            throw new Exception("ffprobe not found at: " . $ffprobe);
         }
 
         // --- PASS 1: Metadata (Headers) ---
         // FIX: We removed the restrictive "show_entries" filter for streams.
         // We now use -show_streams -show_chapters to get EVERYTHING (including tags/language).
         $cmd1 = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_chapters -show_streams -i "%s" 2>&1',
-            Config::FFPROBE, $filePath
+            $ffprobe, $filePath
         );
         $data1 = self::getJsonOutput($cmd1);
 
         // --- PASS 2: HDR Data (Packets) ---
         // We scan 50 packets to find the Video Frame Side Data (Mastering Display Metadata).
         $cmd2 = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -i "%s" 2>&1',
-            Config::FFPROBE, $filePath
+            $ffprobe, $filePath
         );
         $data2 = self::getJsonOutput($cmd2);
 

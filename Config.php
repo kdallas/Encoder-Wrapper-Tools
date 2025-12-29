@@ -2,13 +2,58 @@
 
 class Config
 {
-    const MKV_MRG = 'E:\Apps\StaxRip-x64-2.0.6.0\Apps\Support\mkvtoolnix\mkvmerge.exe';
-    const VID_ENC = 'E:\Apps\StaxRip-x64-2.0.6.0\Apps\Encoders\NVEnc\NVEncC64.exe';
-    const AUD_ENC = 'E:\Apps\StaxRip-x64-2.0.6.0\Apps\Encoders\ffmpeg\ffmpeg.exe';
-    const MKV_MUX = 'E:\Apps\StaxRip-x64-2.0.6.0\Apps\Encoders\ffmpeg\ffmpeg.exe';
-    const FFPROBE = 'E:\Apps\StaxRip-x64-2.0.6.0\Apps\Encoders\ffmpeg\ffprobe.exe';
+    private static $data = [];
+    private static $isLoaded = false;
 
-    // DEFAULTS (Can be overridden via CLI)
-    const DEFAULT_WRK_PATH = 'R:/temp-stuff/_encodes/'; // Where we save the encoder work files and final output
-    const DEFAULT_JOB_PATH = './output/';               // Where we save the .ps1 batch job files
+    // --- DEFAULTS (Fallback if .env.yaml is missing) ---
+    private static $defaults = [
+        'MKV_MRG' => 'E:/Apps/mkvtoolnix/mkvmerge.exe',
+        'VID_ENC' => 'E:/Apps/NVEnc/NVEncC64.exe',
+        'AUD_ENC' => 'E:/Apps/ffmpeg/ffmpeg.exe',
+        'MKV_MUX' => 'E:/Apps/ffmpeg/ffmpeg.exe',
+        'FFPROBE' => 'E:/Apps/ffmpeg/ffprobe.exe',
+
+        // DEFAULTS (Also set in .env, then can be overridden via CLI)
+        'DEFAULT_WRK_PATH' => 'E:/temp/',
+        'DEFAULT_JOB_PATH' => './output/',
+    ];
+
+    public static function get($key) {
+        if (!self::$isLoaded) {
+            self::load();
+        }
+        return self::$data[$key] ?? null;
+    }
+
+    private static function load() {
+        // Start with defaults
+        self::$data = self::$defaults;
+
+        // Check for .env file
+        $envPath = __DIR__ . '/.env.yaml';
+
+        if (file_exists($envPath)) {
+            $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            foreach ($lines as $line) {
+                // Ignore comments
+                if (str_starts_with(trim($line), '#')) continue;
+
+                // Parse Key: Value
+                if (str_contains($line, ':')) {
+                    list($k, $v) = explode(':', $line, 2);
+                    $key = trim($k);
+                    $val = trim($v);
+                    
+                    // Remove wrapping quotes if present
+                    $val = trim($val, " \"'");
+                    
+                    // Update setting
+                    if (array_key_exists($key, self::$data)) {
+                        self::$data[$key] = $val;
+                    }
+                }
+            }
+        }
+        self::$isLoaded = true;
+    }
 }

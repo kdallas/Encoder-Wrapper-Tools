@@ -25,6 +25,11 @@ output/
 .idea/
 *-bak*
 
+# DotEnv config
+.env
+.env.yml
+.env.yaml
+
 # Unit test reports
 TEST*.xml
 
