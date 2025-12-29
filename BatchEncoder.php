@@ -50,32 +50,30 @@ class BatchEncoder
 
     /**
      * CENTRAL PATH CLEANER
-     * 1. Converts backslashes to forward slashes.
-     * 2. Fixes Git Bash paths (/c/Users -> C:/Users).
-     * 3. Enforces trailing slash if $isDir is true.
+     * Converts everything to Forward Slashes (/) for internal consistency 
+     * and Git Bash compatibility.
      */
     private function sanitizePath($path, $isDir = false) {
-        // 1. Unify Slashes
+        // 1. Unify Slashes to /
         $clean = str_replace('\\', '/', $path);
 
         // 2. Fix Git Bash "Drive Letter" paths (e.g., /c/Windows -> C:/Windows)
-        if (preg_match('/^\/([a-zA-Z])\/(.*)/', $clean, $matches)) {
+        // Only apply if it looks like a drive path, NOT a UNC path (//Server)
+        if (!str_starts_with($clean, '//') && preg_match('/^\/([a-zA-Z])\/(.*)/', $clean, $matches)) {
             $drive = strtoupper($matches[1]);
             $clean = $drive . ':/' . $matches[2];
         }
 
+        // 3. Trailing Slash Logic (only for directories)
+        // We use a robust check: is_dir(Unix) OR is_dir(Win)
         if (!$isDir) {
-            // Let's be sure this is not a directory
-            $isDir = is_dir($clean);
+            $isDir = is_dir($clean) || is_dir($this->toWinPath($clean));
         }
 
-        // 3. Trailing Slash Logic (only for directories)
         if ($isDir && !str_ends_with($clean, '/')) {
             $clean .= '/';
         }
         
-        // Trim trailing slash for files (if user accidentally added one?) 
-        // Not strictly necessary but keeps file paths clean.
         if (!$isDir && str_ends_with($clean, '/')) {
             $clean = rtrim($clean, '/');
         }
@@ -86,7 +84,7 @@ class BatchEncoder
     /**
      * OUTPUT HELPER
      * Converts internal forward slashes to Windows backslashes
-     * ONLY for writing into the .ps1 files.
+     * Used for: .ps1 generation, UNC file checks, and FFmpeg commands.
      */
     private function toWinPath($path) {
         return str_replace('/', '\\', $path);
@@ -225,16 +223,24 @@ class BatchEncoder
         $targetPath = $this->pathInput; 
         $srcExts = ['mkv','mp4'];
 
-        if (is_file($targetPath)) {
+        // Robust Check: Try Unix path first, then Windows path
+        $existsFile = is_file($targetPath) || is_file($this->toWinPath($targetPath));
+        $existsDir  = is_dir($targetPath)  || is_dir($this->toWinPath($targetPath));
+
+        if ($existsFile) {
             echo "Target identified as Single File.\n";
             return [$targetPath];
         } 
-        elseif (is_dir($targetPath)) {
+        elseif ($existsDir) {
             // Remove any trailing slashes since ScanDir adds DIRECTORY_SEPARATOR
             $targetPath = rtrim($targetPath, ' /\\');
 
             echo "Scanning: $targetPath (Recursive: " . ($this->recursive ? 'ON' : 'OFF') . ")\n";
-            $scanned = ScanDir::scan($targetPath, $srcExts, $this->recursive);
+            
+            // FIX: Pass Windows-style path to the scanner to ensure UNC compatibility
+            // ScanDir returns filenames/paths, which we then sanitize back to /
+            $scanPath = $this->toWinPath($targetPath);
+            $scanned = ScanDir::scan($scanPath, $srcExts, $this->recursive);
 
             if (empty($scanned)) {
                 throw new Exception("No valid files found in directory.");
@@ -269,7 +275,6 @@ class BatchEncoder
         if(file_exists($mergeBat)) unlink($mergeBat);
         if(file_exists($cleanBat)) unlink($cleanBat);
 
-        $mergeOptions = '-c copy -map 0:v:0 -map 1:a:0';
         $maxLength = 80;
 
         foreach ($files as $cleanPath) {
@@ -277,7 +282,9 @@ class BatchEncoder
             $fileName = basename($cleanPath);
 
             // Probe Logic
-            $probeData = Probe::analyze($cleanPath);
+            // FIX: Pass Windows Path to Probe for UNC compatibility
+            $probeData = Probe::analyze($this->toWinPath($cleanPath));
+            
             if (!$probeData) {
                 echo "Warning: Could not analyze file $fileName. Using defaults.\n";
                 $probeData = [
@@ -304,7 +311,7 @@ class BatchEncoder
             $subInputs = "";
             $subMaps   = "";
             $subClean  = "";
-            
+
             // Input Index Tracker for Muxer
             // 0=Video (PreMux), 1=Audio (OutAud)
             $nextMuxIndex = 2; 
@@ -314,11 +321,10 @@ class BatchEncoder
             if ($probeData['has_chapters']) {
                 // Add Source File as Input to Muxer just for chapters
                 $subInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
-                
+
                 // Map chapters from this input (Index 2 usually)
                 $chapterMapArgs = " -map_chapters $nextMuxIndex";
-                
-                $nextMuxIndex++; // Increment index
+                $nextMuxIndex++; 
                 echo "  [Chapter]: Mapping directly from Source.\n";
             }
 
@@ -339,7 +345,7 @@ class BatchEncoder
                     // Extract to temp MKV (Safest for PGS/ASS/SRT)
                     $subOut = $this->wrkPath . $this->swapExt($fileName, 'mkv', $suffix);
                     
-                    // FIX: Added -map_chapters -1 to prevent chapters in sub file
+                    // Added -map_chapters -1 to prevent chapters in sub file
                     $subJobs .= sprintf('%s -i "%s" -map 0:%d -c copy -map_chapters -1 "%s"' . "\n",
                         $this->toWinPath(Config::get('AUD_ENC')),
                         $this->toWinPath($cleanPath),
@@ -446,7 +452,7 @@ class BatchEncoder
                     $audioExt = 'mka';
                     echo "  [Audio]: Unknown source codec '$srcCodec'. Defaulting to .mka\n";
                 }
-                
+
                 // Override options for Copy Mode
                 $finalAudOpts = '-c:a copy';
                 echo "  [Audio]: Copy mode detected. Source: $srcCodec -> Ext: .$audioExt\n";
@@ -484,7 +490,6 @@ class BatchEncoder
             }
 
             // BUILD JOBS
-            // Calculate Outputs (Forward Slashes Internal)
             $outVid = $this->wrkPath . $this->swapExt($fileName, 'h265');
             $outAud = $this->wrkPath . $this->swapExt($fileName, $audioExt);
             $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
@@ -493,7 +498,7 @@ class BatchEncoder
             $currentVidOptions = $this->finalVidOptions . " --level $level $colorParams $hdrParams";
 
             // Format Commands (Use toWinPath() here for the Batch File content)
-            
+
             // Video
             $videoJob = sprintf('%s %s -i "%s" -o "%s"' . "\n", 
                 $this->toWinPath(Config::get('VID_ENC')),
