@@ -36,24 +36,43 @@ It automates the complex chain of **Video Encoding** (NVEnc/HEVC), **Audio Proce
 
 ## **Configuration**
 
-The system is configured via Config.php. Ensure the following paths are correct for your environment:
+The system is configured via `.env.yaml` with fallback to paths in `Config.php`. Ensure the following paths are correct for your environment:
 
 - **Tools**: Define absolute paths for MKV_MRG, VID_ENC, AUD_ENC, and FFPROBE.
 - **Default Paths**: Set DEFAULT_WRK_PATH for temporary/final media files and DEFAULT_JOB_PATH for the generated scripts.
 
+`.env-example.yaml`:
+```yaml
+# Tool Paths
+MKV_MRG: "E:/Apps/mkvtoolnix/mkvmerge.exe"
+VID_ENC: "E:/Apps/NVEnc/NVEncC64.exe"
+AUD_ENC: "E:/Apps/ffmpeg/ffmpeg.exe"
+MKV_MUX: "E:/Apps/ffmpeg/ffmpeg.exe"
+FFPROBE: "E:/Apps/ffmpeg/ffprobe.exe"
+
+# Defaults
+DEFAULT_WRK_PATH: "E:/temp/"
+DEFAULT_JOB_PATH: "./output/"
+```
+
+`Config.php`:
 ```php
 class Config
 {
-    // Tool Paths
-    const MKV_MRG = 'E:/Apps/StaxRip/Apps/Support/mkvtoolnix/mkvmerge.exe';
-    const VID_ENC = 'E:/Apps/StaxRip/Apps/Encoders/NVEnc/NVEncC64.exe';
-    const AUD_ENC = 'E:/Apps/StaxRip/Apps/Encoders/ffmpeg/ffmpeg.exe';
-    const MKV_MUX = 'E:/Apps/StaxRip/Apps/Encoders/ffmpeg/ffmpeg.exe'; // Used for final muxing
-    const FFPROBE = 'E:/Apps/StaxRip/Apps/Encoders/ffmpeg/ffprobe.exe';
 
-    // Default Directories
-    const DEFAULT_WRK_PATH = 'R:/temp/';  // Where temporary encoding artifacts (h265, opus, mkv) are stored
-    const DEFAULT_JOB_PATH = './output/'; // Where the generated .ps1 scripts are saved
+    // --- DEFAULTS (Fallback if .env.yaml is missing) ---
+    private static $defaults = [
+        'MKV_MRG' => 'E:/Apps/mkvtoolnix/mkvmerge.exe',
+        'VID_ENC' => 'E:/Apps/NVEnc/NVEncC64.exe',
+        'AUD_ENC' => 'E:/Apps/ffmpeg/ffmpeg.exe',
+        'MKV_MUX' => 'E:/Apps/ffmpeg/ffmpeg.exe', // Used for final muxing
+        'FFPROBE' => 'E:/Apps/ffmpeg/ffprobe.exe',
+
+        // DEFAULTS (Also set in .env, then can be overridden via CLI)
+        'DEFAULT_WRK_PATH' => 'E:/temp/',  // Where temporary encoding artifacts (h265, opus, mkv) are stored
+        'DEFAULT_JOB_PATH' => './output/', // Where the generated .ps1 scripts are saved
+    ];
+
 }
 ```
 
