@@ -52,11 +52,18 @@ class Probe
             foreach ($data1->streams as $stream) {
                 if (isset($stream->codec_type)) {
                     if ($stream->codec_type === 'video') {
-                        $width = intval($stream->width ?? 0);
-                        $height = intval($stream->height ?? 0);
-                        $primaries = $stream->color_primaries ?? null;
-                        $videoCodec = $stream->codec_name ?? 'unknown';
-                    } 
+                        // Check for Cover Art / Attached Pictures
+                        $disp = $stream->disposition ?? null;
+                        $isAttached = (isset($disp->attached_pic) && $disp->attached_pic == 1);
+
+                        // Only capture if it is NOT a cover art image
+                        if (!$isAttached) {
+                            $width = intval($stream->width ?? 0);
+                            $height = intval($stream->height ?? 0);
+                            $primaries = $stream->color_primaries ?? null;
+                            $videoCodec = $stream->codec_name ?? 'unknown';
+                        }
+                    }
                     elseif ($stream->codec_type === 'audio') {
                         // Capture ONLY the first audio stream we encounter
                         if ($audioCodec === null) { 
