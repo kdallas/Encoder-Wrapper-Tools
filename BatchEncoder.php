@@ -54,17 +54,20 @@ class BatchEncoder
      * and Git Bash compatibility.
      */
     private function sanitizePath($path, $isDir = false) {
-        // 1. Unify Slashes to /
+        // Unify Slashes to /
         $clean = str_replace('\\', '/', $path);
 
-        // 2. Fix Git Bash "Drive Letter" paths (e.g., /c/Windows -> C:/Windows)
+        // Remove surrounding quotes (Single or Double)
+        $clean = trim($clean, ' "\'');
+
+        // Fix Git Bash "Drive Letter" paths (e.g., /c/Windows -> C:/Windows)
         // Only apply if it looks like a drive path, NOT a UNC path (//Server)
         if (!str_starts_with($clean, '//') && preg_match('/^\/([a-zA-Z])\/(.*)/', $clean, $matches)) {
             $drive = strtoupper($matches[1]);
             $clean = $drive . ':/' . $matches[2];
         }
 
-        // 3. Trailing Slash Logic (only for directories)
+        // Trailing Slash Logic (only for directories)
         // We use a robust check: is_dir(Unix) OR is_dir(Win)
         if (!$isDir) {
             $isDir = is_dir($clean) || is_dir($this->toWinPath($clean));
@@ -245,7 +248,7 @@ class BatchEncoder
             if (empty($scanned)) {
                 throw new Exception("No valid files found in directory.");
             }
-            
+
             // ScanDir might return mixed slashes depending on OS; unify them here for safety.
             return array_map(fn($p) => $this->sanitizePath($p, false), $scanned);
         } 
