@@ -88,7 +88,7 @@ Run the application from the terminal using the following syntax:
 
 ## **Core Arguments**
 
-| **Argument** | **Description** |
+| **Argument** &nbsp; &nbsp; &nbsp; &nbsp; | **Description** |
 | --- | --- |
 | `--path` | **Required.** The path to a single file or a directory to scan. |
 |   | The source file or directory to process. Accepts standard Windows paths (`C:\`) or Git Bash style (`/c/`). |
