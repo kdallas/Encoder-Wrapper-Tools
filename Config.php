@@ -8,6 +8,7 @@ class Config
     // --- DEFAULTS (Fallback if .env.yaml is missing) ---
     private static $defaults = [
         'MKV_MRG' => 'E:/Apps/mkvtoolnix/mkvmerge.exe',
+        'MKV_PED' => 'E:/Apps/mkvtoolnix/mkvpropedit.exe',
         'VID_ENC' => 'E:/Apps/NVEnc/NVEncC64.exe',
         'AUD_ENC' => 'E:/Apps/ffmpeg/ffmpeg.exe',
         'MKV_MUX' => 'E:/Apps/ffmpeg/ffmpeg.exe',
