@@ -547,9 +547,11 @@ class BatchEncoder
             echo "Queuing: $displaySrc\n";
 
             // Write to Files
+            if (strlen($subJobs)) {
+                file_put_contents($subBat, $subJobs, FILE_APPEND);
+            }
             file_put_contents($videoBat, $videoJob, FILE_APPEND);
             file_put_contents($audioBat, $audioJob, FILE_APPEND);
-            file_put_contents($subBat,   $subJobs,  FILE_APPEND);
             file_put_contents($mergeBat, $preMxJob, FILE_APPEND);
             file_put_contents($mergeBat, $muxerJob, FILE_APPEND);
             file_put_contents($cleanBat, $cleanJob, FILE_APPEND);
