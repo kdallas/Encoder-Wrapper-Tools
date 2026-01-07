@@ -5,14 +5,14 @@ class Profiles
     public static function getVideo() {
         return [
             '2pass' => function($args) {
-                $bitrate = $args['bitrate'] ?? $args['bitvid'] ?? '1200'; 
-                return "--vbrhq $bitrate --codec h265 --preset quality --output-depth 10 --aq-temporal --mv-precision Q-pel --lookahead 32 --avhw";
+                $bitrate = $args['bitrate'] ?? $args['bitvid'] ?? '1200';
+                return "--vbrhq $bitrate --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --mv-precision Q-pel --lookahead 32 --avhw";
             },
             'cqp' => function($args) {
-                $q = $args['q'] ?? '20'; 
-                return "--cqp $q --codec h265 --preset quality --output-depth 10 --aq-temporal --mv-precision Q-pel --lookahead 32 --avhw";
+                $q = $args['q'] ?? '20';
+                return "--cqp $q --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --mv-precision Q-pel --lookahead 32 --avhw";
             },
-            'default' => "--vbrhq 1200 --codec h265 --preset quality --output-depth 10"
+            'default' => "--vbrhq 1200 --codec h265 --preset quality --level auto --output-depth 10"
         ];
     }
 

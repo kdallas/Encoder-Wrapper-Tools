@@ -472,8 +472,6 @@ class BatchEncoder
                 $targetH = intval($resMatch[2]);
             }
 
-            $level = ($targetW > 1920 || $targetH > 1080) ? '5.0' : '4.1';
-
             $colorParams = "";
             $hdrParams   = "";
 
@@ -482,7 +480,7 @@ class BatchEncoder
                 if (!empty($probeData['hdr_mastering'])) {
                     $hdrParams = '--master-display "' . $probeData['hdr_mastering'] . '"';
                 }
-                echo "  [Auto-Spec]: Detected HDR. Using Level $level & BT.2020.\n";
+                echo "  [Auto-Spec]: Detected HDR. Using BT.2020 color matrix.\n";
             } else {
                 if ($probeData['primaries'] === 'bt709') {
                     $colorParams = "--transfer bt709 --colorprim bt709 --colormatrix bt709";
@@ -498,7 +496,7 @@ class BatchEncoder
             $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
             $finMkv = $this->wrkPath . $this->swapExt($fileName, 'mkv');
 
-            $currentVidOptions = $this->finalVidOptions . " --level $level $colorParams $hdrParams";
+            $currentVidOptions = trim($this->finalVidOptions . " $colorParams $hdrParams");
 
             // Format Commands (Use toWinPath() here for the Batch File content)
 
