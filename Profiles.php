@@ -12,6 +12,7 @@ class Profiles
                 $q = $args['q'] ?? '20';
                 return "--cqp $q --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --mv-precision Q-pel --lookahead 32 --avhw";
             },
+            'copy'    => 'copy',
             'default' => "--vbrhq 1200 --codec h265 --preset quality --level auto --output-depth 10"
         ];
     }

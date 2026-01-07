@@ -7,6 +7,10 @@ class BatchEncoder
     private $prefixInput = "";
     private $recursive = false;
 
+    // Track Selection Inputs
+    private $audioLangs = [];  // e.g. ['eng', 'jpn']
+    private $defaultLang = ""; // e.g. 'eng'
+
     // Paths
     private $wrkPath = ""; // Destination for .h265/.opus/.mkv files
     private $jobPath = ""; // Destination for .ps1 files
@@ -94,19 +98,28 @@ class BatchEncoder
     }
 
     private function parseArguments($argv) {
+        // Env Var Check
+        $envPath = getenv('BATCH_PATH');
+        if ($envPath !== false && !empty($envPath)) {
+            $this->pathInput = $this->sanitizePath($envPath, false);
+            echo "Input Source: Loaded from BATCH_PATH environment variable.\n";
+        }
+
         for ($i = 1; $i < count($argv); $i++) {
             $arg = $argv[$i];
             
             if (str_starts_with($arg, '--path=')) {
-                $raw = substr($arg, 7);
-                // Stitch spaces if path was unquoted
-                for ($j = $i + 1; $j < count($argv); $j++) {
-                    if (str_starts_with($argv[$j], '-')) break; 
-                    $raw .= " " . $argv[$j];
-                    $i++;
+                if (empty($this->pathInput)) {
+                    $raw = substr($arg, 7);
+                    // Stitch spaces if path was unquoted
+                    for ($j = $i + 1; $j < count($argv); $j++) {
+                        if (str_starts_with($argv[$j], '-')) break; 
+                        $raw .= " " . $argv[$j];
+                        $i++;
+                    }
+                    // Sanitize immediately (False for $isDir, because it might be a file)
+                    $this->pathInput = $this->sanitizePath($raw, false);
                 }
-                // Sanitize immediately (False for $isDir, because it might be a file)
-                $this->pathInput = $this->sanitizePath($raw, false);
             } 
             elseif (str_starts_with($arg, '--prefix=')) {
                 $this->prefixInput = substr($arg, 9);
@@ -115,6 +128,15 @@ class BatchEncoder
                     $this->prefixInput .= " " . $argv[$j];
                     $i++;
                 }
+            }
+            // Audio Lang Selection
+            elseif (str_starts_with($arg, '--langs=')) {
+                $raw = substr($arg, 8);
+                $this->audioLangs = array_map('strtolower', explode(',', $raw));
+            }
+            // Default Lang Selection
+            elseif (str_starts_with($arg, '--default-lang=')) {
+                $this->defaultLang = strtolower(substr($arg, 15));
             }
             elseif (str_starts_with($arg, '--out-path=')) {
                 // User override for Work Path -> Force Dir
@@ -152,7 +174,7 @@ class BatchEncoder
     }
 
     private function validateInputs() {
-        if (empty($this->pathInput)) { throw new Exception("Missing --path value"); }
+        if (empty($this->pathInput)) { throw new Exception("Missing --path value (or BATCH_PATH env var)"); }
         if (empty($this->prefixInput)) { throw new Exception("Missing --prefix value"); }
     }
 
@@ -168,7 +190,12 @@ class BatchEncoder
         }
 
         $rawVid = $vidProfiles[$this->videoProfileKey];
-        $this->finalVidOptions = is_callable($rawVid) ? $rawVid($this->extraArgs) : $rawVid;
+        // Check for Video Copy Mode
+        if ($this->videoProfileKey === 'copy') {
+             $this->finalVidOptions = 'copy';
+        } else {
+             $this->finalVidOptions = is_callable($rawVid) ? $rawVid($this->extraArgs) : $rawVid;
+        }
 
         $rawAud = $audProfiles[$this->audioProfileKey];
         $this->finalAudOptions = is_callable($rawAud) ? $rawAud($this->extraArgs) : $rawAud;
@@ -193,7 +220,7 @@ class BatchEncoder
                 break;
         }
 
-        if (!empty($vppString)) {
+        if (!empty($vppString) && $this->videoProfileKey !== 'copy') {
             $this->finalVidOptions .= " " . $vppString;
             echo "Modifier [VPP]: {$this->vppInput} -> $vppString\n";
         }
@@ -294,6 +321,7 @@ class BatchEncoder
                     'width' => 1920, 'height' => 1080, 'video_codec' => 'unknown', 
                     'is_hdr' => false, 'primaries' => null,
                     'audio_codec' => 'opus', 'audio_channels' => 0,
+                    'audio_tracks' => [], // Ensure array exists
                     'has_chapters' => false, 'subtitles' => [],
                 ];
             }
@@ -307,7 +335,29 @@ class BatchEncoder
                 echo "    HDR:   No\n";
             }
             echo "    Audio: {$probeData['audio_codec']} ({$probeData['audio_channels']}ch)\n";
-            // -----------------------------
+            
+            // --- Report Audio Track Selection ---
+            $keepTracks = [];
+            if (!empty($this->audioLangs)) {
+                foreach ($probeData['audio_tracks'] as $track) {
+                    $tLang = strtolower($track['lang']);
+                    if (in_array($tLang, $this->audioLangs)) {
+                        $keepTracks[] = $track;
+                    }
+                }
+                if (empty($keepTracks)) {
+                     echo "    Warning: No audio matched '" . implode(',',$this->audioLangs) . "'. Keeping ALL.\n";
+                     $keepTracks = $probeData['audio_tracks'];
+                } else {
+                     echo "    Audio Selection: Keeping " . count($keepTracks) . " tracks matching '" . implode(',',$this->audioLangs) . "'.\n";
+                }
+            } else {
+                // Default: Keep ALL tracks (New Behavior for Multi-Track support)
+                $keepTracks = $probeData['audio_tracks'];
+                // Only log if interesting
+                if (count($keepTracks) > 1) echo "    Audio Selection: Keeping ALL " . count($keepTracks) . " tracks.\n";
+            }
+            // ----------------------------------------
 
             // --- SUBTITLE & CHAPTER LOGIC ---
             $subJobs = "";
@@ -316,7 +366,7 @@ class BatchEncoder
             $subClean  = "";
 
             // Input Index Tracker for Muxer
-            // 0=Video (PreMux), 1=Audio (OutAud)
+            // 0=Video (PreMux or Source), 1=Audio (OutAud)
             $nextMuxIndex = 2; 
 
             // Chapter Logic (Map from Source)
@@ -366,7 +416,9 @@ class BatchEncoder
                 }
             }
 
-            // --- SMART AUDIO LOGIC START ---
+            // --- SMART AUDIO LOGIC ---
+            // Note: Applying Smart Logic based on the FIRST track in selection for consistency
+            // For complex mixed-codec scenarios, manual profiles should be used.
             $activeProfile = $this->audioProfileKey;
             $srcCodec = strtolower($probeData['audio_codec'] ?? '');
             $srcCh    = intval($probeData['audio_channels'] ?? 0);
@@ -377,7 +429,7 @@ class BatchEncoder
                 $activeProfile = 'opus-stereo';
             }
 
-            // Check for Smart Copy conditions (Opus source only)
+            // Check for Smart Copy conditions
             if ($srcCodec === 'opus') {
                 if ($activeProfile === 'default') {
                     // Default usually encodes, but if source is Opus, we prefer Copy
@@ -411,57 +463,47 @@ class BatchEncoder
             elseif ($activeProfile === 'opus-8-6' && $srcCh > 6) {
                 echo "  [Smart Audio]: Source is $srcCodec ($srcCh channels). Will downmix to 5.1 Opus.\n";
             }
-            // --- SMART AUDIO LOGIC END ---
+            // --------------------------
+
+            // --- BUILD AUDIO MAPS & FLAGS ---
+            $audMapStr = "";
+            $audDispStr = "";
+            $outAudIndex = 0;
+            
+            foreach ($keepTracks as $track) {
+                // $audMapStr .= " -map 0:a:{$track['index']}"; // Map source index
+                $audMapStr .= " -map 0:{$track['index']}"; // Use Global Index (0:1, 0:2) instead of Relative Audio Index (0:a:1)
+
+                // Determine Flags
+                $isDef = 0;
+                if (!empty($this->defaultLang)) {
+                    if (strtolower($track['lang']) === $this->defaultLang) {
+                        $isDef = 1;
+                        $this->defaultLang = ""; // Only flag the first match
+                    }
+                } elseif ($track['default']) {
+                    $isDef = 1;
+                }
+                
+                $audDispStr .= " -disposition:a:$outAudIndex " . ($isDef ? 'default' : '0');
+                $outAudIndex++;
+            }
+            // --------------------------------------
 
             // --- AUDIO EXECUTION LOGIC ---
             $audioExt = 'opus'; // Default
             $finalAudOpts = $this->finalAudOptions; // Default
 
             if ($activeProfile === 'copy') {
-                // Map ffmpeg codec names to file extensions
-                $codecMap = [
-                    // --- Dolby ---
-                    'ac3'         => 'ac3',   // Standard Dolby Digital
-                    'eac3'        => 'eac3',  // Dolby Digital Plus (DDP) & Atmos
-                    'mlp'         => 'thd',   // Meridian Lossless (TrueHD Core)
-                    'truehd'      => 'thd',   // Dolby TrueHD & Atmos
-
-                    // --- DTS ---
-                    'dts'         => 'dts',   // Covers DTS, DTS-ES, DTS-HD HR, DTS-HD MA, and DTS:X
-
-                    // --- Lossless / High Fidelity ---
-                    'alac'        => 'm4a',   // Apple Lossless
-                    'ape'         => 'ape',   // Monkey's Audio
-                    'flac'        => 'flac',
-                    'pcm_s16le'   => 'wav',
-                    'pcm_s24le'   => 'wav',
-                    'pcm_f32le'   => 'wav',
-                    'pcm_bluray'  => 'wav',
-                    'wavpack'     => 'wv',
-
-                    // --- Standard / Legacy ---
-                    'aac'         => 'aac',
-                    'mp2'         => 'mp2',   // Common in DVDs/Broadcast
-                    'mp3'         => 'mp3',
-                    'opus'        => 'opus',
-                    'vorbis'      => 'ogg',   // Common in older MKVs
-                    'wmav2'       => 'wma',   // Windows Media Audio
-                ];
-
-                if (array_key_exists($srcCodec, $codecMap)) {
-                    $audioExt = $codecMap[$srcCodec];
-                } else {
-                    // Fallback for unknown codecs (e.g. pcm_s16le), mka is safe for almost anything
-                    $audioExt = 'mka';
-                    echo "  [Audio]: Unknown source codec '$srcCodec'. Defaulting to .mka\n";
-                }
-
-                // Override options for Copy Mode
+                // MKA is the safest container for copying (supports multiple streams & all codecs)
+                $audioExt = 'mka';
+                
                 $finalAudOpts = '-c:a copy';
-                echo "  [Audio]: Copy mode detected. Source: $srcCodec -> Ext: .$audioExt\n";
+                echo "  [Audio]: Copy mode detected.";
             } else {
-                echo "  [Audio]: Encoding to {$activeProfile}. Ext: .$audioExt\n";
+                echo "  [Audio]: Encoding to {$activeProfile}.";
             }
+            echo " Source: $srcCodec -> Ext: .$audioExt\n";
 
             // Video/Level Logic
             $targetW = $probeData['width'];
@@ -491,6 +533,9 @@ class BatchEncoder
             }
 
             // BUILD JOBS
+            // Check for Video Copy Mode
+            $isVideoCopy = ($this->videoProfileKey === 'copy');
+            
             $outVid = $this->wrkPath . $this->swapExt($fileName, 'h265');
             $outAud = $this->wrkPath . $this->swapExt($fileName, $audioExt);
             $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
@@ -500,59 +545,98 @@ class BatchEncoder
 
             // Format Commands (Use toWinPath() here for the Batch File content)
 
-            // Video
-            $videoJob = sprintf('%s %s -i "%s" -o "%s"' . "\n", 
-                $this->toWinPath(Config::get('VID_ENC')),
-                $currentVidOptions, 
-                $this->toWinPath($cleanPath), 
-                $this->toWinPath($outVid)
-            );
+            $preMxJob = "";
+            $cleanJob = "";
 
-            // Audio
-            $audioJob = sprintf('%s -i "%s" %s "%s"' . "\n", 
+            if (!$isVideoCopy) {
+                // Video Encode Job
+                $videoJob = sprintf('%s %s -i "%s" -o "%s"' . "\n", 
+                    $this->toWinPath(Config::get('VID_ENC')), 
+                    $currentVidOptions, 
+                    $this->toWinPath($cleanPath), 
+                    $this->toWinPath($outVid)
+                );
+
+                // Pre-Mux Job
+                $preMxJob = sprintf('%s -o "%s" "%s"' . "\n", 
+                    $this->toWinPath(Config::get('MKV_MRG')),
+                    $this->toWinPath($preMux), 
+                    $this->toWinPath($outVid)
+                );
+                
+                // Cleanup items for Encode mode
+                $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outVid));
+                $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($preMux));
+            } else {
+                echo "  [Video]: Copy Mode (Remux). Skipping Encode.\n";
+            }
+
+            // Audio Job (Updated with multi-track Maps)
+            $audioJob = sprintf('%s -i "%s" %s %s %s "%s"' . "\n", 
                 $this->toWinPath(Config::get('AUD_ENC')), 
                 $this->toWinPath($cleanPath), 
-                $this->finalAudOptions, 
+                $audMapStr,    // Map specific tracks
+                $finalAudOpts, 
+                $audDispStr,   // Set flags
                 $this->toWinPath($outAud)
             );
 
-            // Pre-Mux (Video only into MKV)
-            $preMxJob = sprintf('%s -o "%s" "%s"' . "\n", 
-                $this->toWinPath(Config::get('MKV_MRG')),
-                $this->toWinPath($preMux), 
-                $this->toWinPath($outVid)
-            );
+            // Mux Job
+            $muxCmd = $this->toWinPath(Config::get('MKV_MUX'));
+            $muxInputs = "";
+            $muxMaps = "";
 
-            // Muxer (Video + Audio + Source[Chapters?] + Subs)
-            $baseMuxMap = "-c copy -map 0:v:0 -map 1:a:0 $chapterMapArgs $subMaps";
+            // 1. Video Input
+            if ($isVideoCopy) {
+                // Input 0: Source File (Map Source Video Track 0)
+                $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
+                $muxMaps   .= " -map 0:v:0"; 
+            } else {
+                // Input 0: Encoded Video (Map PreMux Video Track 0)
+                $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($preMux));
+                $muxMaps   .= " -map 0:v:0";
+            }
 
-            $muxerJob = sprintf('%s -i "%s" -i "%s"%s %s "%s"' . "\n", 
-                $this->toWinPath(Config::get('MKV_MUX')),
-                $this->toWinPath($preMux),
-                $this->toWinPath($outAud),
-                $subInputs,   // -i Source (if chapters) + -i sub1.mkv...
-                $baseMuxMap,  // -map 0... -map 1... -map_chapters 2 ...
+            // 2. Audio Input
+            // Input 1: Audio File (Map ALL tracks from this new file)
+            $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($outAud));
+            $muxMaps   .= " -map 1:a"; 
+
+            // 3. Subtitles & Chapters Inputs
+            // Appended dynamically (e.g. -i source for chapters, -i sub_eng.mkv...)
+            $muxInputs .= $subInputs;
+
+            // 4. Map Arguments
+            // Appended dynamically (e.g. -map_chapters 2 -map 3:0...)
+            $muxMaps   .= " $chapterMapArgs $subMaps";
+
+            // Generate Final Command
+            $muxerJob = sprintf('%s %s %s -c copy "%s"' . "\n",
+                $muxCmd,
+                $muxInputs,
+                $muxMaps,
                 $this->toWinPath($finMkv)
             );
 
-            // Cleanup
-            $cleanJob  = sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outVid));
+            // Remaining Cleanup
             $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outAud));
-            $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($preMux));
             $cleanJob .= $subClean;
 
-            // Output to Screen (Display Windows style for user familiarity)
+            // Output to Screen
             $displaySrc = $this->toWinPath($cleanPath);
             $displaySrc = (strlen($displaySrc) > $maxLength) ? '...' . substr($displaySrc, -$maxLength) : $displaySrc;
             echo "Queuing: $displaySrc\n";
 
-            // Write to Files
+            // Write to Files (Restored Original Block Structure)
+            // Only write Video/PreMux if we are NOT copying
+            if (!$isVideoCopy) {
+                file_put_contents($videoBat, $videoJob, FILE_APPEND);
+                file_put_contents($mergeBat, $preMxJob, FILE_APPEND);
+            }
             if (strlen($subJobs)) {
                 file_put_contents($subBat, $subJobs, FILE_APPEND);
             }
-            file_put_contents($videoBat, $videoJob, FILE_APPEND);
             file_put_contents($audioBat, $audioJob, FILE_APPEND);
-            file_put_contents($mergeBat, $preMxJob, FILE_APPEND);
             file_put_contents($mergeBat, $muxerJob, FILE_APPEND);
             file_put_contents($cleanBat, $cleanJob, FILE_APPEND);
         }
