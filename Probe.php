@@ -2,7 +2,13 @@
 
 class Probe
 {
-    // Returns: ['width', 'height', 'video_codec', 'is_hdr', 'hdr_mastering', 'primaries', 'audio_codec', 'audio_channels', 'subtitles' => [], 'chapters' => bool]
+    // Returns: [
+    //    'width', 'height', 'video_codec', 'is_hdr', 'hdr_mastering', 'primaries', 
+    //    'audio_codec', 'audio_channels', // (Legacy/Main track info)
+    //    'audio_tracks' => [], // (List of all audio streams)
+    //    'subtitles' => [], 
+    //    'chapters' => bool
+    // ]
     public static function analyze($filePath) {
         $ffprobe = Config::get('FFPROBE');
 
@@ -11,7 +17,7 @@ class Probe
         }
 
         // --- PASS 1: Metadata (Headers) ---
-        // FIX: We removed the restrictive "show_entries" filter for streams.
+        // We removed the restrictive "show_entries" filter for streams.
         // We now use -show_streams -show_chapters to get EVERYTHING (including tags/language).
         $cmd1 = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_chapters -show_streams -i "%s" 2>&1',
             $ffprobe, $filePath
@@ -31,8 +37,8 @@ class Probe
         $width = 0; $height = 0; 
         $primaries = null; 
         $videoCodec = 'unknown';
-        $audioCodec = null; 
-        $audioChannels = 0;
+
+        $audioTracks = []; // Collection for all audio streams
         $subtitles = [];
 
         // Helper: Case-insensitive property getter for Tags
@@ -51,6 +57,8 @@ class Probe
         if (isset($data1->streams)) {
             foreach ($data1->streams as $stream) {
                 if (isset($stream->codec_type)) {
+                    
+                    // --- VIDEO ---
                     if ($stream->codec_type === 'video') {
                         // Check for Cover Art / Attached Pictures
                         $disp = $stream->disposition ?? null;
@@ -64,13 +72,29 @@ class Probe
                             $videoCodec = $stream->codec_name ?? 'unknown';
                         }
                     }
+                    
+                    // --- AUDIO ---
                     elseif ($stream->codec_type === 'audio') {
-                        // Capture ONLY the first audio stream we encounter
-                        if ($audioCodec === null) { 
-                            $audioCodec = $stream->codec_name ?? 'opus';
-                            $audioChannels = intval($stream->channels ?? 0);
-                        }
+                        $tags = $stream->tags ?? null;
+                        $disp = $stream->disposition ?? null;
+
+                        $lang = $getTag($tags, 'language') ?? 'und';
+                        $title = $getTag($tags, 'title') ?? '';
+                        $isDefault = isset($disp->default) ? $disp->default : 0;
+                        $isForced  = isset($disp->forced) ? $disp->forced : 0;
+
+                        $audioTracks[] = [
+                            'index'    => $stream->index,
+                            'codec'    => $stream->codec_name ?? 'opus',
+                            'channels' => intval($stream->channels ?? 0),
+                            'lang'     => $lang,
+                            'title'    => $title,
+                            'default'  => $isDefault,
+                            'forced'   => $isForced
+                        ];
                     }
+                    
+                    // --- SUBTITLES ---
                     elseif ($stream->codec_type === 'subtitle') {
                         // Capture Subtitle Data
                         $tags = $stream->tags ?? null;
@@ -96,15 +120,15 @@ class Probe
             }
         }
 
-        // Fallback default if NO audio stream was found
-        if ($audioCodec === null) {
-            $audioCodec = 'opus';
-        }
+        // Backward Compatibility: Populate legacy keys using the first audio track found
+        $mainAudio = $audioTracks[0] ?? ['codec' => 'opus', 'channels' => 0];
+        $legacyAudioCodec = $mainAudio['codec'];
+        $legacyAudioChannels = $mainAudio['channels'];
 
-        // Check for Chapters (From Pass 1)
+        // Check for Chapters
         $hasChapters = !empty($data1->chapters);
 
-        // Parse HDR (From Pass 2)
+        // Parse HDR
         $hdrString = null;
         if ($data2 && !empty($data2->frames)) {
             foreach ($data2->frames as $frame) {
@@ -126,8 +150,14 @@ class Probe
             'is_hdr'         => ($hdrString !== null),
             'hdr_mastering'  => $hdrString,
             'primaries'      => $primaries,
-            'audio_codec'    => $audioCodec,
-            'audio_channels' => $audioChannels,
+            
+            // Legacy Keys (For current BatchEncoder compatibility)
+            'audio_codec'    => $legacyAudioCodec,
+            'audio_channels' => $legacyAudioChannels,
+            
+            // New Data
+            'audio_tracks'   => $audioTracks,
+            
             'subtitles'      => $subtitles,
             'has_chapters'   => $hasChapters,
         ];
