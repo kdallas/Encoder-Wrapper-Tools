@@ -5,6 +5,7 @@ class BatchEncoder
     // Inputs
     private $pathInput = "";
     private $prefixInput = "";
+    private $titleInput = null;
     private $recursive = false;
 
     // Track Selection Inputs
@@ -160,6 +161,10 @@ class BatchEncoder
             }
             elseif (str_starts_with($arg, '--vpp=')) {
                 $this->vppInput = substr($arg, 6);
+            }
+            elseif (str_starts_with($arg, '--title=')) {
+                // " --title=" results in empty string, effectively removing it
+                $this->titleInput = substr($arg, 8); 
             }
             elseif ($arg === '--recursive') {
                 $this->recursive = true;
@@ -571,13 +576,20 @@ class BatchEncoder
                 echo "  [Video]: Copy Mode (Remux). Skipping Encode.\n";
             }
 
+            $metaArgs = "";
+            if ($this->titleInput !== null) {
+                // Determine title arg (empty string strips it)
+                $metaArgs = sprintf(' -metadata title="%s"', $this->titleInput);
+            }
+
             // Audio Job (Updated with multi-track Maps)
-            $audioJob = sprintf('%s -i "%s" %s %s %s "%s"' . "\n", 
+            $audioJob = sprintf('%s -i "%s" %s %s %s %s "%s"' . "\n", 
                 $this->toWinPath(Config::get('AUD_ENC')), 
                 $this->toWinPath($cleanPath), 
                 $audMapStr,    // Map specific tracks
                 $finalAudOpts, 
                 $audDispStr,   // Set flags
+                $metaArgs,
                 $this->toWinPath($outAud)
             );
 
@@ -611,10 +623,11 @@ class BatchEncoder
             $muxMaps   .= " $chapterMapArgs $subMaps";
 
             // Generate Final Command
-            $muxerJob = sprintf('%s %s %s -c copy "%s"' . "\n",
+            $muxerJob = sprintf('%s %s %s %s -c copy "%s"' . "\n",
                 $muxCmd,
                 $muxInputs,
                 $muxMaps,
+                $metaArgs,
                 $this->toWinPath($finMkv)
             );
 
