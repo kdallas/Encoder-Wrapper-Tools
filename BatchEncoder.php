@@ -206,10 +206,9 @@ class BatchEncoder
         $this->finalAudOptions = is_callable($rawAud) ? $rawAud($this->extraArgs) : $rawAud;
 
         // VPP Logic
-        $vppString = '';
         switch ($this->vppInput) {
-            case 'none':
-                $vppString = '';
+            case 'edge':
+                $vppString = '--vpp-edgelevel';
                 break;
             case 'deband':
                 $vppString = '--vpp-deband';
@@ -217,12 +216,9 @@ class BatchEncoder
             case 'both':
                 $vppString = '--vpp-edgelevel --vpp-deband';
                 break;
-            case 'edge':
+            case 'none':
             default:
-                // Default behavior if --vpp is missing or explicitly 'edge'
-                // Change this to case 'edge': ... default: $vppString = ''; if you prefer no defaults.
-                $vppString = '--vpp-edgelevel';
-                break;
+                $vppString = '';
         }
 
         if (!empty($vppString) && $this->videoProfileKey !== 'copy') {
