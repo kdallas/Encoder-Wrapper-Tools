@@ -107,6 +107,16 @@ class BatchEncoder
             $clean = $drive . ':/' . $matches[2];
         }
 
+        $pharPath = Phar::running(false);
+
+        // Force Absolute Path (Critical for Phar)
+        // If path does not start with '/' (Unix/Root) and does not match 'C:/' (Win)
+        if ($pharPath && !str_starts_with($clean, '/') && !preg_match('/^[a-zA-Z]:\//', $clean)) {
+            // It is relative. Prepend the Current Working Directory.
+            $cwd = str_replace('\\', '/', getcwd());
+            $clean = rtrim($cwd, '/') . '/' . $clean;
+        }
+
         // Trailing Slash Logic (only for directories)
         // We use a robust check: is_dir(Unix) OR is_dir(Win)
         if (!$isDir) {
