@@ -30,8 +30,20 @@ class Config
         // Start with defaults
         self::$data = self::$defaults;
 
+        // Determine Base Directory
+        // Check if we are running inside a Phar archive
+        $pharPath = Phar::running(false);
+
+        if (!empty($pharPath)) {
+            // PHAR MODE: Get the directory where the .phar file is located
+            $baseDir = dirname($pharPath);
+        } else {
+            // STANDARD MODE: Get the directory where this script resides
+            $baseDir = __DIR__;
+        }
+
         // Check for .env file
-        $envPath = __DIR__ . '/.env.yaml';
+        $envPath = $baseDir . '/.env.yaml';
 
         if (file_exists($envPath)) {
             $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
