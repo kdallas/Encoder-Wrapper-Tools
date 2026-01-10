@@ -102,10 +102,11 @@ Run the application from the terminal using the following syntax:
 | `--video` | Selects the video profile (e.g., `2pass`, `cqp`, `copy`). Default: `default`. |
 | `--audio` | Selects the audio profile (e.g., `opus-5.1`, `copy`). Default: `default`. |
 | `--resize` | Resizes the output video (Format: `WxH`, e.g., `--resize=1920x1080`). |
-| `--crop` | Crops the input video (Format: `Left,Top,Right,Bottom`). |
+| `--crop` | Crops the input video (Format: `Left,Top,Right,Bottom`, e.g., `--crop=0,140,0,140`). |
 | `--vpp` | Apply hardware video pre-processing filters (`edge`, `deband`, `both`, `none`). |
 | `--q` | Overrides the constant quality (CQP) value (e.g., `--q=18`). |
-| `--bitrate` | Overrides the target bitrate for 2pass mode (e.g., `--bitrate=2000`). |
+| `--bitvid` | (Also `--bitrate`). Sets target bitrate (Kbps) for 2pass mode (e.g., `--bitvid=2000`). |
+| `--bitaud` | (Also `--abitrate`). Sets target bitrate for Opus audio transcode (e.g., `--bitaud=300k`). |
 
 <br>
 
@@ -211,7 +212,7 @@ This mode allows you to modify file headers (Default flags, Track Names) in-plac
 
 **Anime Optimization (Deband + Stereo Audio):**
 ```sh
-./run.php --path="/e/Anime/Series/" --prefix="AnimeBatch" --video=balanced --vpp=deband --audio=opus-stereo
+./run.php --path="/e/Anime/Series/" --prefix="AnimeBatch" --video=2pass --bitvid=1000 --vpp=deband --audio=opus-stereo
 ```
 
 **Default Video Encode (vbrhq 1200) with 7.1 to 5.1 Downmix:**
