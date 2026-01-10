@@ -6,6 +6,7 @@ class BatchEncoder
     private $pathInputs = [];
     private $prefixInput = "";
     private $customMuxFile = "";
+    private $customPropsFile = "";
     private $titleInput = null;
     private $recursive = false;
 
@@ -38,12 +39,14 @@ class BatchEncoder
             $this->parseArguments($argv);
             $this->validateInputs();
 
-            // Only resolve profiles if NOT doing a custom mux
-            if (empty($this->customMuxFile)) {
+            // Only resolve profiles if NOT doing a custom job
+            if (empty($this->customMuxFile) && empty($this->customPropsFile)) {
                 $this->resolveProfiles();
             } else {
-                echo "Mode: Custom Mux Passthrough (skipping profile resolution)\n";
-                echo "Params File: {$this->customMuxFile}\n";
+                echo "Mode: Custom Job (skipping profile resolution)\n";
+                if ($this->customMuxFile) echo "Type: Mux Passthrough ({$this->customMuxFile})\n";
+                if ($this->customPropsFile) echo "Type: Property Edit ({$this->customPropsFile})\n";
+                echo "Output Path (Work): {$this->wrkPath}\n";
                 echo "Output Path (Jobs): {$this->jobPath}\n\n";
             }
         } catch (Exception $e) {
@@ -54,21 +57,29 @@ class BatchEncoder
 
     public function run() {
         try {
-            // Group files by filename (e.g. "S01E01" -> [Path1, Path2])
+            // Group files by normalized filename (e.g. "S01E01" -> [Path1, Path2])
             $fileSets = $this->scanAndGroupTargets();
             
-            if (empty($this->customMuxFile)) {
-                // Standard Workflow
-                // Flatten the groups back to a single list for standard processing
+            if (!empty($this->customMuxFile)) {
+                // 1. Custom Mux Workflow (Merging multiple inputs)
+                $this->generateCustomMuxFiles($fileSets);
+            } 
+            elseif (!empty($this->customPropsFile)) {
+                // 2. Custom Props Workflow (Copy + Edit)
+                // Flatten the groups: We only edit the first file found for each name
                 $flatList = [];
-                foreach ($fileSets as $name => $paths) {
-                     // For standard mode, we usually only handle one source per file
+                foreach ($fileSets as $key => $paths) {
+                     $flatList[] = $paths[0]; 
+                }
+                $this->generateCustomPropsFiles($flatList);
+            }
+            else {
+                // 3. Standard Encode Workflow
+                $flatList = [];
+                foreach ($fileSets as $key => $paths) {
                      $flatList[] = $paths[0]; 
                 }
                 $this->generateBatchFiles($flatList);
-            } else {
-                // Custom Mux Workflow
-                $this->generateCustomMuxFiles($fileSets);
             }
 
         } catch (Exception $e) {
@@ -147,6 +158,9 @@ class BatchEncoder
             elseif (str_starts_with($arg, '--custom-mux=')) {
                 $this->customMuxFile = $this->sanitizePath(substr($arg, 13), false);
             }
+            elseif (str_starts_with($arg, '--custom-props=')) {
+                $this->customPropsFile = $this->sanitizePath(substr($arg, 15), false);
+            }
             elseif (str_starts_with($arg, '--prefix=')) {
                 $this->prefixInput = substr($arg, 9);
                 for ($j = $i + 1; $j < count($argv); $j++) {
@@ -157,8 +171,7 @@ class BatchEncoder
             }
             // Audio Lang Selection
             elseif (str_starts_with($arg, '--langs=')) {
-                $raw = substr($arg, 8);
-                $this->audioLangs = array_map('strtolower', explode(',', $raw));
+                $this->audioLangs = array_map('strtolower', explode(',', substr($arg, 8)));
             }
             // Default Lang Selection
             elseif (str_starts_with($arg, '--default-lang=')) {
@@ -210,6 +223,11 @@ class BatchEncoder
         if (!empty($this->customMuxFile)) {
              if (!file_exists($this->customMuxFile) && !file_exists($this->toWinPath($this->customMuxFile))) {
                  throw new Exception("Custom mux file not found: {$this->customMuxFile}");
+             }
+        }
+        if (!empty($this->customPropsFile)) {
+             if (!file_exists($this->customPropsFile) && !file_exists($this->toWinPath($this->customPropsFile))) {
+                 throw new Exception("Custom props file not found: {$this->customPropsFile}");
              }
         }
     }
@@ -396,6 +414,49 @@ class BatchEncoder
         }
         
         echo "\nDone. Created: $mergeBat\n";
+    }
+
+    /**
+     * CUSTOM PROPS: Copy + MkvPropEdit
+     */
+    private function generateCustomPropsFiles($files) {
+        // Read Params (strip newlines)
+        $rawParams = file_get_contents($this->customPropsFile);
+        $cleanParams = trim(preg_replace('/\s+/', ' ', $rawParams));
+
+        if (!is_dir($this->jobPath)) {
+            mkdir($this->jobPath, 0777, true);
+        }
+
+        $propBat = $this->jobPath . $this->prefixInput . '_props.ps1';
+        if(file_exists($propBat)) unlink($propBat);
+
+        $toolCmd = $this->toWinPath(Config::get('MKV_PED')); 
+
+        foreach ($files as $sourcePath) {
+            $fileName = basename($sourcePath);
+            $finalMkv = $this->wrkPath . $fileName;
+
+            // 1. Copy Source -> Output
+            $copyCmd = sprintf('Copy-Item "%s" "%s"', 
+                $this->toWinPath($sourcePath), 
+                $this->toWinPath($finalMkv)
+            );
+
+            // 2. Run PropEdit on Output
+            $editCmd = sprintf('%s "%s" %s', 
+                $toolCmd, 
+                $this->toWinPath($finalMkv), 
+                $cleanParams
+            );
+
+            echo "Queuing Custom Props: $fileName\n";
+            
+            // Append commands to batch file
+            file_put_contents($propBat, $copyCmd . "\n" . $editCmd . "\n", FILE_APPEND);
+        }
+
+        echo "\nDone. Created: $propBat\n";
     }
 
     private function generateBatchFiles($files) {
@@ -585,7 +646,6 @@ class BatchEncoder
             $outAudIndex = 0;
             
             foreach ($keepTracks as $track) {
-                // $audMapStr .= " -map 0:a:{$track['index']}"; // Map source index
                 $audMapStr .= " -map 0:{$track['index']}"; // Use Global Index (0:1, 0:2) instead of Relative Audio Index (0:a:1)
 
                 // Determine Flags
