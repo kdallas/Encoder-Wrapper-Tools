@@ -3,8 +3,9 @@
 class BatchEncoder
 {
     // Inputs
-    private $pathInput = "";
+    private $pathInputs = [];
     private $prefixInput = "";
+    private $customMuxFile = "";
     private $titleInput = null;
     private $recursive = false;
 
@@ -36,7 +37,15 @@ class BatchEncoder
 
             $this->parseArguments($argv);
             $this->validateInputs();
-            $this->resolveProfiles();
+
+            // Only resolve profiles if NOT doing a custom mux
+            if (empty($this->customMuxFile)) {
+                $this->resolveProfiles();
+            } else {
+                echo "Mode: Custom Mux Passthrough (skipping profile resolution)\n";
+                echo "Params File: {$this->customMuxFile}\n";
+                echo "Output Path (Jobs): {$this->jobPath}\n\n";
+            }
         } catch (Exception $e) {
             echo "Error: " . $e->getMessage() . "\n";
             exit(1);
@@ -45,8 +54,23 @@ class BatchEncoder
 
     public function run() {
         try {
-            $files = $this->scanTargets();
-            $this->generateBatchFiles($files);
+            // Group files by filename (e.g. "S01E01" -> [Path1, Path2])
+            $fileSets = $this->scanAndGroupTargets();
+            
+            if (empty($this->customMuxFile)) {
+                // Standard Workflow
+                // Flatten the groups back to a single list for standard processing
+                $flatList = [];
+                foreach ($fileSets as $name => $paths) {
+                     // For standard mode, we usually only handle one source per file
+                     $flatList[] = $paths[0]; 
+                }
+                $this->generateBatchFiles($flatList);
+            } else {
+                // Custom Mux Workflow
+                $this->generateCustomMuxFiles($fileSets);
+            }
+
         } catch (Exception $e) {
             echo "Error: " . $e->getMessage() . "\n";
             exit(1);
@@ -99,10 +123,10 @@ class BatchEncoder
     }
 
     private function parseArguments($argv) {
-        // Env Var Check
+        // Env Var Check (Legacy support for single path)
         $envPath = getenv('BATCH_PATH');
         if ($envPath !== false && !empty($envPath)) {
-            $this->pathInput = $this->sanitizePath($envPath, false);
+            $this->pathInputs[] = $this->sanitizePath($envPath, false);
             echo "Input Source: Loaded from BATCH_PATH environment variable.\n";
         }
 
@@ -110,18 +134,19 @@ class BatchEncoder
             $arg = $argv[$i];
             
             if (str_starts_with($arg, '--path=')) {
-                if (empty($this->pathInput)) {
-                    $raw = substr($arg, 7);
-                    // Stitch spaces if path was unquoted
-                    for ($j = $i + 1; $j < count($argv); $j++) {
-                        if (str_starts_with($argv[$j], '-')) break; 
-                        $raw .= " " . $argv[$j];
-                        $i++;
-                    }
-                    // Sanitize immediately (False for $isDir, because it might be a file)
-                    $this->pathInput = $this->sanitizePath($raw, false);
+                $raw = substr($arg, 7);
+                // Stitch spaces if path was unquoted
+                for ($j = $i + 1; $j < count($argv); $j++) {
+                    if (str_starts_with($argv[$j], '-')) break; 
+                    $raw .= " " . $argv[$j];
+                    $i++;
                 }
+                // Sanitize immediately (False for $isDir, because it might be a file), then add to array
+                $this->pathInputs[] = $this->sanitizePath($raw, false);
             } 
+            elseif (str_starts_with($arg, '--custom-mux=')) {
+                $this->customMuxFile = $this->sanitizePath(substr($arg, 13), false);
+            }
             elseif (str_starts_with($arg, '--prefix=')) {
                 $this->prefixInput = substr($arg, 9);
                 for ($j = $i + 1; $j < count($argv); $j++) {
@@ -179,8 +204,14 @@ class BatchEncoder
     }
 
     private function validateInputs() {
-        if (empty($this->pathInput)) { throw new Exception("Missing --path value (or BATCH_PATH env var)"); }
+        if (empty($this->pathInputs)) { throw new Exception("Missing --path value(s)"); }
         if (empty($this->prefixInput)) { throw new Exception("Missing --prefix value"); }
+
+        if (!empty($this->customMuxFile)) {
+             if (!file_exists($this->customMuxFile) && !file_exists($this->toWinPath($this->customMuxFile))) {
+                 throw new Exception("Custom mux file not found: {$this->customMuxFile}");
+             }
+        }
     }
 
     private function resolveProfiles() {
@@ -248,41 +279,123 @@ class BatchEncoder
         echo "Output Path (Jobs): {$this->jobPath}\n\n";
     }
 
-    private function scanTargets() {
-        // NOTE: $this->pathInput is already sanitized (C:/Format/...)
-
-        $targetPath = $this->pathInput; 
+    /**
+     * Scan all path inputs and group them by filename (without extension).
+     * Returns: ['MyVideo' => ['Path/To/Source1/MyVideo.mkv', 'Path/To/Source2/MyVideo.mp4']]
+     */
+    private function scanAndGroupTargets() {
+        $fileSets = [];
         $srcExts = ['mkv','mp4'];
 
-        // Robust Check: Try Unix path first, then Windows path
-        $existsFile = is_file($targetPath) || is_file($this->toWinPath($targetPath));
-        $existsDir  = is_dir($targetPath)  || is_dir($this->toWinPath($targetPath));
-
-        if ($existsFile) {
-            echo "Target identified as Single File.\n";
-            return [$targetPath];
-        } 
-        elseif ($existsDir) {
-            // Remove any trailing slashes since ScanDir adds DIRECTORY_SEPARATOR
-            $targetPath = rtrim($targetPath, ' /\\');
-
-            echo "Scanning: $targetPath (Recursive: " . ($this->recursive ? 'ON' : 'OFF') . ")\n";
+        foreach ($this->pathInputs as $inputPath) {
+            // Robust Check: Try Unix path first, then Windows path
+            $existsFile = is_file($inputPath) || is_file($this->toWinPath($inputPath));
+            $existsDir  = is_dir($inputPath)  || is_dir($this->toWinPath($inputPath));
             
-            // FIX: Pass Windows-style path to the scanner to ensure UNC compatibility
-            // ScanDir returns filenames/paths, which we then sanitize back to /
-            $scanPath = $this->toWinPath($targetPath);
-            $scanned = ScanDir::scan($scanPath, $srcExts, $this->recursive);
+            $foundFiles = [];
 
-            if (empty($scanned)) {
-                throw new Exception("No valid files found in directory.");
+            if ($existsFile) {
+                echo "Source identified as Single File: $inputPath\n";
+                $foundFiles[] = $inputPath;
+            } elseif ($existsDir) {
+                // Remove any trailing slashes since ScanDir adds DIRECTORY_SEPARATOR
+                // Pass Windows-style path to the scanner to ensure UNC compatibility
+                $scanPath = $this->toWinPath(rtrim($inputPath, ' /\\'));
+                echo "Scanning: $scanPath (Recursive: " . ($this->recursive ? 'ON' : 'OFF') . ")\n";
+
+                // ScanDir returns filenames/paths, which we then sanitize back to /
+                $found = ScanDir::scan($scanPath, $srcExts, $this->recursive);
+
+                // ScanDir might return mixed slashes depending on OS; unify them here for safety.
+                $foundFiles = array_map(fn($p) => $this->sanitizePath($p, false), $found);
+            } else {
+                 echo "Warning: Path not found: $inputPath\n";
+                 continue;
             }
 
-            // ScanDir might return mixed slashes depending on OS; unify them here for safety.
-            return array_map(fn($p) => $this->sanitizePath($p, false), $scanned);
-        } 
-        else {
-            throw new Exception("Target path does not exist: $targetPath");
+            // Grouping Logic
+            foreach ($foundFiles as $file) {
+                $info = pathinfo($file);
+                $baseName = $info['filename']; 
+                // Determine Key (Base Name)
+                // Note: For parallel matching to work, filenames must match between folders!
+                //       Uses Normalized Key for matching (ignores punctuation/case)
+                $key = $this->normalizeFilename($baseName);
+
+                if (!isset($fileSets[$key])) {
+                    $fileSets[$key] = [];
+                }
+                $fileSets[$key][] = $file;
+            }
         }
+
+        if (empty($fileSets)) {
+            throw new Exception("No valid files found in any provided paths.");
+        }
+
+        return $fileSets;
+    }
+
+    /**
+     * Helper to ensure filenames match even with punctuation differences
+     * e.g. "Title; Subtitle" == "Title Subtitle"
+     */
+    private function normalizeFilename($name) {
+        $n = strtolower($name);
+        // Replace common punctuation with space
+        $n = str_replace([';', ',', '_', '-', '.', '[', ']', '(', ')'], ' ', $n);
+        // Collapse multiple spaces
+        $n = trim(preg_replace('/\s+/', ' ', $n));
+        return $n;
+    }
+
+    /**
+     * Generates jobs based on Custom Mux Parameters
+     */
+    private function generateCustomMuxFiles($fileSets) {
+        // Read Params
+        $rawParams = file_get_contents($this->customMuxFile);
+        // Collapse newlines into spaces
+        $cleanParams = trim(preg_replace('/\s+/', ' ', $rawParams));
+        
+        // Ensure Directory
+        if (!is_dir($this->jobPath)) {
+            mkdir($this->jobPath, 0777, true);
+        }
+
+        $mergeBat = $this->jobPath . $this->prefixInput . '_mux.ps1';
+        if(file_exists($mergeBat)) unlink($mergeBat);
+
+        $encCmd = $this->toWinPath(Config::get('MKV_MUX')); // Usually ffmpeg
+
+        foreach ($fileSets as $baseName => $sources) {
+            // Check if we have enough sources? 
+            // The user might supply 1 path (internal edit) or 2+ (merge).
+            // We just pass them all in order.
+            
+            $inputArgs = "";
+            foreach ($sources as $src) {
+                $inputArgs .= sprintf(' -i "%s"', $this->toWinPath($src));
+            }
+
+            // Output File Logic:
+            // Since the Key is normalized (lowercase/no punctuation), we don't want to use it for the file name.
+            // Instead, grab the original filename from the first source file found.
+            $originalName = pathinfo($sources[0], PATHINFO_FILENAME);
+            $finalMkv = $this->wrkPath . $originalName . '.mkv';
+
+            $cmd = sprintf('%s %s %s "%s"' . "\n",
+                $encCmd,
+                $inputArgs,
+                $cleanParams,
+                $this->toWinPath($finalMkv)
+            );
+
+            echo "Queuing Custom Mux: $originalName (" . count($sources) . " sources)\n";
+            file_put_contents($mergeBat, $cmd, FILE_APPEND);
+        }
+        
+        echo "\nDone. Created: $mergeBat\n";
     }
 
     private function generateBatchFiles($files) {
