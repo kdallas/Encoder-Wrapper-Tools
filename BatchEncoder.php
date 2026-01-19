@@ -833,7 +833,7 @@ class BatchEncoder
             file_put_contents($cleanBat, $cleanJob, FILE_APPEND);
         }
 
-        echo "\nDone. Created:\n- $videoBat\n- $audioBat\n- $subBat\n- $mergeBat\n- $cleanBat\n";
+        echo "\nDone. Created:\n- $videoBat\n- $audioBat\n- $subBat\n- $mergeBat\n- $cleanBat\n\n";
     }
 
     private function swapExt($filename, $newExt, $suffix='') {
