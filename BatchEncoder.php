@@ -614,6 +614,12 @@ class BatchEncoder
                 $activeProfile = 'opus-stereo';
             }
 
+            // 5.1 Source on 'default' should use 'opus-5.1' for correct channel mapping
+            if ($activeProfile === 'default' && $srcCh === 6) {
+                echo "  [Smart Audio]: 5.1ch Source detected on Default profile. Switching to 'opus-5.1'.\n";
+                $activeProfile = 'opus-5.1';
+            }
+
             // Check for Smart Copy conditions
             if ($srcCodec === 'opus') {
                 if ($activeProfile === 'default') {
@@ -677,6 +683,19 @@ class BatchEncoder
             // --- AUDIO EXECUTION LOGIC ---
             $audioExt = 'opus'; // Default
             $finalAudOpts = $this->finalAudOptions; // Default
+
+            // If profile changed dynamically, re-fetch arguments!
+            if ($activeProfile !== $this->audioProfileKey) {
+                if ($activeProfile === 'copy') {
+                    $finalAudOpts = '-c:a copy';
+                } else {
+                    $freshProfiles = Profiles::getAudio();
+                    if (isset($freshProfiles[$activeProfile])) {
+                        $raw = $freshProfiles[$activeProfile];
+                        $finalAudOpts = is_callable($raw) ? $raw($this->extraArgs) : $raw;
+                    }
+                }
+            }
 
             if ($activeProfile === 'copy') {
                 // MKA is the safest container for copying (supports multiple streams & all codecs)
