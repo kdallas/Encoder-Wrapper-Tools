@@ -6,14 +6,14 @@ class Profiles
         return [
             '2pass' => function($args) {
                 $bitrate = $args['bitrate'] ?? $args['bitvid'] ?? '1200';
-                return "--vbrhq $bitrate --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --mv-precision Q-pel --lookahead 32 --avhw";
+                return "--vbr $bitrate --multipass 2pass-full --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --aq --mv-precision Q-pel --lookahead 32 --avhw";
             },
             'cqp' => function($args) {
                 $q = $args['q'] ?? '20';
-                return "--cqp $q --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --mv-precision Q-pel --lookahead 32 --avhw";
+                return "--cqp $q --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --aq --mv-precision Q-pel --lookahead 32 --avhw";
             },
             'copy'    => 'copy',
-            'default' => "--vbrhq 1200 --codec h265 --preset quality --level auto --output-depth 10"
+            'default' => "--vbr 1200 --multipass 2pass-full --codec h265 --preset quality --level auto --output-depth 10"
         ];
     }
 
@@ -26,6 +26,10 @@ class Profiles
             'opus-5.1' => function($args) {
                 $ab = $args['abitrate'] ?? $args['bitaud'] ?? '224k';
                 return "-c:a libopus -b:a $ab " . '-af "channelmap=channel_layout=5.1"';
+            },
+            'aac-opus' => function($args) {
+                $ab = $args['abitrate'] ?? $args['bitaud'] ?? '224k';
+                return "-c:a libopus -b:a $ab ";
             },
             'opus-pans' => function($args) {
                 $ab = $args['abitrate'] ?? $args['bitaud'] ?? '128k';
