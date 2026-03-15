@@ -641,6 +641,9 @@ class BatchEncoder
                     echo "  [Smart Audio]: Source is Opus Stereo (Pans Profile). Switched to Copy.\n";
                 }
             } 
+            elseif ($activeProfile === 'aac-opus' && $srcCodec === 'aac') {
+                echo "  [Smart Audio]: Source is AAC. Forced converting to Opus.\n";
+            }
             elseif ($srcCodec === 'aac') {
                 // Rule: Copy AAC unless downmixing (5.1->Stereo OR 7.1->5.1)
                 $isDownmix = (($srcCh > 2) && ($activeProfile === 'opus-stereo' || $activeProfile === 'opus-pans'))
