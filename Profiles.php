@@ -62,23 +62,25 @@ class Profiles
     public static function getAudio() {
         return [
             'opus-8-6' => function($args) {
-                $ab = $args['abitrate'] ?? $args['bitaud'] ?? '320k';
+                // Check for 5.1 override, then global, then default
+                $ab = $args['bitaud-51'] ?? $args['abitrate'] ?? $args['bitaud'] ?? '320k';
                 return "-c:a libopus -b:a $ab " . '-vbr on -ac 6 -af "pan=5.1|FL=FL+0.5*BL+0.5*LFE|FR=FR+0.5*BR+0.5*LFE|FC=FC|BL=0.5*BL+0.5*LFE|BR=0.5*BR+0.5*LFE"';
             },
             'opus-5.1' => function($args) {
-                $ab = $args['abitrate'] ?? $args['bitaud'] ?? '224k';
+                $ab = $args['bitaud-51'] ?? $args['abitrate'] ?? $args['bitaud'] ?? '224k';
                 return "-c:a libopus -b:a $ab " . '-af "channelmap=channel_layout=5.1"';
             },
             'aac-opus' => function($args) {
+                // Generic profile, relies on global bitaud
                 $ab = $args['abitrate'] ?? $args['bitaud'] ?? '224k';
                 return "-c:a libopus -b:a $ab ";
             },
             'opus-pans' => function($args) {
-                $ab = $args['abitrate'] ?? $args['bitaud'] ?? '128k';
+                $ab = $args['bitaud-20'] ?? $args['abitrate'] ?? $args['bitaud'] ?? '128k';
                 return "-c:a libopus -b:a $ab " . '-af "volume=1.65,pan=stereo|FL=0.5*FC+0.707*FL+0.707*BL+0.5*LFE|FR=0.5*FC+0.707*FR+0.707*BR+0.5*LFE"';
             },
             'opus-stereo' => function($args) {
-                $ab = $args['abitrate'] ?? $args['bitaud'] ?? '100k';
+                $ab = $args['bitaud-20'] ?? $args['abitrate'] ?? $args['bitaud'] ?? '100k';
                 return "-c:a libopus -b:a $ab -ac 2";
             },
             'copy'    => '-c:a copy',

@@ -503,11 +503,16 @@ class BatchEncoder
             if (!$probeData) {
                 echo "Warning: Could not analyze file $fileName. Using defaults.\n";
                 $probeData = [
-                    'width' => 1920, 'height' => 1080, 'video_codec' => 'unknown', 
-                    'is_hdr' => false, 'primaries' => null,
-                    'audio_codec' => 'opus', 'audio_channels' => 0,
-                    'audio_tracks' => [], // Ensure array exists
-                    'has_chapters' => false, 'subtitles' => [],
+                    'video_codec'    => 'unknown', 
+                    'width'          => 1920,
+                    'height'         => 1080, 
+                    'primaries'      => null,
+                    'is_hdr'         => false, 
+                    'has_chapters'   => false,
+                    'audio_codec'    => 'opus', 
+                    'audio_channels' => 0,
+                    'audio_tracks'   => [], // Ensure array exists
+                    'subtitles'      => [],
                 ];
             }
 
@@ -601,73 +606,138 @@ class BatchEncoder
                 }
             }
 
-            // --- SMART AUDIO LOGIC ---
-            // Note: Applying Smart Logic based on the FIRST track in selection for consistency
-            // For complex mixed-codec scenarios, manual profiles should be used.
-            $activeProfile = $this->audioProfileKey;
+            // Global fallback values from initial probe
             $srcCodec = strtolower($probeData['audio_codec'] ?? '');
             $srcCh    = intval($probeData['audio_channels'] ?? 0);
 
-            // SANITY CHECK: Prevent upmixing Stereo to 5.1 (opus-8-6)
-            if ($activeProfile === 'opus-8-6' && $srcCh <= 2) {
-                echo "  [Smart Audio]: Profile 'opus-8-6' selected but source is Stereo. Switching to 'opus-stereo'.\n";
-                $activeProfile = 'opus-stereo';
-            }
+            // Universal container for multi-track mixing (supports Opus + AC3 copies in same file)
+            $audioExt = 'mka'; // Previously defaulted to .opus
 
-            // 5.1 Source on 'default' should use 'opus-5.1' for correct channel mapping
-            if ($activeProfile === 'default' && $srcCh === 6) {
-                echo "  [Smart Audio]: 5.1ch Source detected on Default profile. Switching to 'opus-5.1'.\n";
-                $activeProfile = 'opus-5.1';
-            }
-
-            // Check for Smart Copy conditions
-            if ($srcCodec === 'opus') {
-                if ($activeProfile === 'default') {
-                    // Default usually encodes, but if source is Opus, we prefer Copy
-                    $activeProfile = 'copy';
-                    echo "  [Smart Audio]: Source is Opus (Default Profile). Switched to Copy.\n";
-                }
-                elseif (($activeProfile === 'opus-5.1' || $activeProfile === 'opus-8-6') && $srcCh === 6) {
-                    $activeProfile = 'copy';
-                    echo "  [Smart Audio]: Source is Opus 5.1. Switched to Copy.\n";
-                }
-                elseif ($activeProfile === 'opus-stereo' && $srcCh === 2) {
-                    $activeProfile = 'copy';
-                    echo "  [Smart Audio]: Source is Opus Stereo. Switched to Copy.\n";
-                }
-                elseif ($activeProfile === 'opus-pans' && $srcCh === 2) {
-                    // Pans profile is usually for downmixing. If source is already stereo, we copy.
-                    $activeProfile = 'copy';
-                    echo "  [Smart Audio]: Source is Opus Stereo (Pans Profile). Switched to Copy.\n";
-                }
-            } 
-            elseif ($activeProfile === 'aac-opus' && $srcCodec === 'aac') {
-                echo "  [Smart Audio]: Source is AAC. Forced converting to Opus.\n";
-            }
-            elseif ($srcCodec === 'aac') {
-                // Rule: Copy AAC unless downmixing (5.1->Stereo OR 7.1->5.1)
-                $isDownmix = (($srcCh > 2) && ($activeProfile === 'opus-stereo' || $activeProfile === 'opus-pans'))
-                          || (($srcCh > 6) && ($activeProfile === 'opus-8-6'));
-
-                if (!$isDownmix) {
-                    $activeProfile = 'copy';
-                    echo "  [Smart Audio]: Source is AAC (No Downmix). Switched to Copy.\n";
-                }
-            }
-            elseif ($activeProfile === 'opus-8-6' && $srcCh > 6) {
-                echo "  [Smart Audio]: Source is $srcCodec ($srcCh channels). Will downmix to 5.1 Opus.\n";
-            }
-            // --------------------------
-
-            // --- BUILD AUDIO MAPS & FLAGS ---
+            // --- PER-TRACK SMART AUDIO LOGIC & MAPS & FLAGS ---
             $audMapStr = "";
             $audDispStr = "";
+            $finalAudOptsStr = "";
             $outAudIndex = 0;
             
-            foreach ($keepTracks as $track) {
-                $audMapStr .= " -map 0:{$track['index']}"; // Use Global Index (0:1, 0:2) instead of Relative Audio Index (0:a:1)
+            echo "  [Audio Processing]:\n";
 
-                // Determine Flags
+            foreach ($keepTracks as $track) {
+                $audMapStr .= " -map 0:{$track['index']}";
+
+                // 1. Fetch exact codec and channels for THIS specific track
+                // FIX: Removed "0:" from the stream specifier
+                $probeCmd = sprintf('%s -v error -select_streams %d -show_entries stream=codec_name,channels -of csv=p=0 "%s"', 
+                    $this->toWinPath(Config::get('FFPROBE')), 
+                    $track['index'], 
+                    $this->toWinPath($cleanPath)
+                );
+                
+                $probeOutput = [];
+                exec($probeCmd, $probeOutput);
+
+                $trackCodec = $srcCodec; // fallback
+                $trackCh = $srcCh;       // fallback
+                if (!empty($probeOutput) && strpos($probeOutput[0], ',') !== false) {
+                    list($tc, $tch) = explode(',', $probeOutput[0]);
+                    $trackCodec = strtolower(trim($tc));
+                    $trackCh = intval(trim($tch));
+                }
+
+                // 2. Smart Logic for THIS Track
+                $activeProfile = $this->audioProfileKey;
+
+                // SANITY CHECK: Prevent upmixing Stereo to 5.1 (opus-8-6)
+                if ($activeProfile === 'opus-8-6' && $trackCh <= 2) {
+                    echo "    [Smart Audio]: Profile 'opus-8-6' selected but source is <= 2ch. Switching to 'opus-stereo'.\n";
+                    $activeProfile = 'opus-stereo';
+                }
+                // Default handling for exactly 6 channels (5.1)
+                elseif ($activeProfile === 'default' && $trackCh === 6) {
+                    echo "    [Smart Audio]: 5.1ch Source detected on 'default'. Switching to 'opus-5.1'.\n";
+                    $activeProfile = 'opus-5.1';
+                }
+                // Default handling for >6 channels (7.1+)
+                elseif ($activeProfile === 'default' && $trackCh > 6) {
+                    echo "    [Smart Audio]: 7.1ch+ Source detected on 'default'. Switching to 'opus-8-6' downmix.\n";
+                    $activeProfile = 'opus-8-6';
+                }
+                // Explicitly route stereo (or mono) to opus-stereo when using 'default'
+                elseif ($activeProfile === 'default' && $trackCh <= 2) {
+                    echo "    [Smart Audio]: <= 2ch Source detected on 'default'. Switching to 'opus-stereo'.\n";
+                    $activeProfile = 'opus-stereo';
+                }
+
+                if ($trackCodec === 'opus') {
+                    if ($activeProfile === 'default') {
+                        // Default usually encodes, but if source is Opus, we prefer Copy
+                        $activeProfile = 'copy';
+                        echo "    [Smart Audio]: Source is Opus (Default Profile). Switched to Copy.\n";
+                    }
+                    elseif (($activeProfile === 'opus-5.1' || $activeProfile === 'opus-8-6') && $trackCh === 6) {
+                        $activeProfile = 'copy';
+                        echo "    [Smart Audio]: Source is Opus 5.1. Switched to Copy.\n";
+                    }
+                    elseif ($activeProfile === 'opus-stereo' && $trackCh === 2) {
+                        $activeProfile = 'copy';
+                        echo "    [Smart Audio]: Source is Opus Stereo. Switched to Copy.\n";
+                    }
+                    elseif ($activeProfile === 'opus-pans' && $trackCh === 2) {
+                        // Pans profile is usually for downmixing. If source is already stereo, we copy.
+                        $activeProfile = 'copy';
+                        echo "    [Smart Audio]: Source is Opus Stereo (Pans Profile). Switched to Copy.\n";
+                    }
+                } 
+                elseif ($activeProfile === 'aac-opus' && $trackCodec === 'aac') {
+                    echo "    [Smart Audio]: Source is AAC. Forced converting to Opus.\n";
+                }
+                elseif ($trackCodec === 'aac') {
+                    // Rule: Copy AAC unless downmixing (5.1->Stereo OR 7.1->5.1)
+                    $isDownmix = (($trackCh > 2) && ($activeProfile === 'opus-stereo' || $activeProfile === 'opus-pans'))
+                              || (($trackCh > 6) && ($activeProfile === 'opus-8-6'));
+
+                    if (!$isDownmix) {
+                        $activeProfile = 'copy';
+                        echo "    [Smart Audio]: Source is AAC (No Downmix). Switched to Copy.\n";
+                    }
+                }
+                elseif ($activeProfile === 'opus-8-6' && $trackCh > 6) {
+                    echo "    [Smart Audio]: Source is $trackCodec ($trackCh channels). Will downmix to 5.1 Opus.\n";
+                }
+
+                // 3. Resolve Arguments
+                $trackOpts = "";
+                if ($activeProfile === 'copy') {
+                    $trackOpts = '-c:a copy';
+                    echo "      Trk {$track['index']} ($trackCodec {$trackCh}ch) -> Copy\n";
+                } else {
+                    $freshProfiles = Profiles::getAudio();
+                    if (isset($freshProfiles[$activeProfile])) {
+                        $raw = $freshProfiles[$activeProfile];
+                        $trackOpts = is_callable($raw) ? $raw($this->extraArgs) : $raw;
+                    } else {
+                        $trackOpts = $this->finalAudOptions;
+                    }
+                    
+                    // Extract bitrate for display purposes
+                    $bitrateDisplay = "";
+                    if (preg_match('/-b:a\s+([0-9]+[kKmM]?)/i', $trackOpts, $matches)) {
+                        $bitrateDisplay = " @" . strtoupper($matches[1]) . "bps";
+                    }
+                    
+                    echo "      Trk {$track['index']} ($trackCodec {$trackCh}ch) -> Encode ($activeProfile{$bitrateDisplay})\n";
+                }
+
+                // 4. Inject Stream Specifiers
+                // Replaces '-c:a ' with '-c:a:0 ' so FFmpeg maps the profile correctly to the stream
+                $trackOpts = str_replace(
+                    ['-c:a ', '-b:a ', '-ac ', '-af '],
+                    ["-c:a:$outAudIndex ", "-b:a:$outAudIndex ", "-ac:a:$outAudIndex ", "-filter:a:$outAudIndex "],
+                    $trackOpts . ' '
+                );
+                
+                $finalAudOptsStr .= " " . trim($trackOpts);
+
+                // 5. Flags / Disposition
                 $isDef = 0;
                 if (!empty($this->defaultLang)) {
                     if (strtolower($track['lang']) === $this->defaultLang) {
@@ -681,35 +751,6 @@ class BatchEncoder
                 $audDispStr .= " -disposition:a:$outAudIndex " . ($isDef ? 'default' : '0');
                 $outAudIndex++;
             }
-            // --------------------------------------
-
-            // --- AUDIO EXECUTION LOGIC ---
-            $audioExt = 'opus'; // Default
-            $finalAudOpts = $this->finalAudOptions; // Default
-
-            // If profile changed dynamically, re-fetch arguments!
-            if ($activeProfile !== $this->audioProfileKey) {
-                if ($activeProfile === 'copy') {
-                    $finalAudOpts = '-c:a copy';
-                } else {
-                    $freshProfiles = Profiles::getAudio();
-                    if (isset($freshProfiles[$activeProfile])) {
-                        $raw = $freshProfiles[$activeProfile];
-                        $finalAudOpts = is_callable($raw) ? $raw($this->extraArgs) : $raw;
-                    }
-                }
-            }
-
-            if ($activeProfile === 'copy') {
-                // MKA is the safest container for copying (supports multiple streams & all codecs)
-                $audioExt = 'mka';
-                
-                $finalAudOpts = '-c:a copy';
-                echo "  [Audio]: Copy mode detected.";
-            } else {
-                echo "  [Audio]: Encoding to {$activeProfile}.";
-            }
-            echo " Source: $srcCodec -> Ext: .$audioExt\n";
 
             // Video/Level Logic
             $targetW = $probeData['width'];
@@ -788,7 +829,7 @@ class BatchEncoder
                 $this->toWinPath(Config::get('AUD_ENC')), 
                 $this->toWinPath($cleanPath), 
                 $audMapStr,    // Map specific tracks
-                $finalAudOpts, 
+                $finalAudOptsStr, // Injects dynamic mapped options (-c:a:0... -filter:a:1...) 
                 $audDispStr,   // Set flags
                 $metaArgs,
                 $this->toWinPath($outAud)
