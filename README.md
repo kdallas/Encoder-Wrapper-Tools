@@ -18,7 +18,7 @@ It automates the complex chain of **Video Encoding** (NVEnc/HEVC), **Audio Proce
 - **Custom Muxing Engine**: Supports "Passthrough" mode where complex `ffmpeg` mapping logic (maps, dispositions, metadata) is read from a text file and applied to batches of files.
 - **Metadata Editing**: Includes a mode for `mkvpropedit` to perform in-place updates of track flags and titles without full file remuxing.
 - **Intelligent HDR Handling**: Detects HDR10 metadata (Mastering Display Metadata) and automatically configures NVEncC with correct transfer characteristics and color matrices.
-- **Smart Audio Logic**: Analyzes source audio streams; if the source is already Opus or AAC and matches the target profile (e.g., Opus 2.0 -> Opus 2.0), it defaults to a lossless copy (`.mka`) instead of re-encoding.
+- **Smart Audio Logic**: Analyzes source audio streams **per-track**; if the source is already Opus or AAC and matches the target profile (e.g., Opus 2.0 -> Opus 2.0), it defaults to a lossless copy (`.mka`) instead of re-encoding. Supports mixed-format outputs (e.g., copying AC3 commentary while encoding DTS 5.1 to Opus).
 - **Subtitle & Chapter Extraction**: Preserves original chapters and extracts English-language subtitles while filtering out SDH (Hearing Impaired) tracks.
 - **Dynamic Video Spec Selection**: Automatically calculates the appropriate H.265 level (4.1 for 1080p, 5.0 for 4K) based on output resolution.
 - **Modular Script Generation**: Creates separated PowerShell scripts (`_vid`, `_aud`, `_sub`, `_mux`, `_del`) for modular execution.
@@ -106,7 +106,9 @@ Run the application from the terminal using the following syntax:
 | `--vpp` | Apply hardware video pre-processing filters (`edge`, `deband`, `both`, `none`). |
 | `--q` | Overrides the constant quality (CQP) value (e.g., `--q=18`). |
 | `--bitvid` | (Also `--bitrate`). Sets target bitrate (Kbps) for 2pass mode (e.g., `--bitvid=2000`). |
-| `--bitaud` | (Also `--abitrate`). Sets target bitrate for Opus audio transcode (e.g., `--bitaud=300k`). |
+| `--bitaud` | (Also `--abitrate`). Sets global target bitrate for Opus audio transcode (e.g., `--bitaud=300k`). |
+| `--bitaud-51` | Overrides target bitrate specifically for 5.1/7.1 channel downmix/encodes (e.g., `--bitaud-51=400k`). |
+| `--bitaud-20` | Overrides target bitrate specifically for stereo/mono channel downmix/encodes (e.g., `--bitaud-20=150k`). |
 
 <br>
 
@@ -218,6 +220,11 @@ This mode allows you to modify file headers (Default flags, Track Names) in-plac
 **Default Video Encode (vbrhq 1200) with 7.1 to 5.1 Downmix:**
 ```sh
 ./run.php --path="C:\Movies\MyMovie.mkv" --prefix=MyMovie --audio=opus-8-6
+```
+
+**Multi-Track Audio Encoding with Specific Bitrates and Filter Overrides:**
+```sh
+./run.php --path="C:\Movies\MyMovie.mkv" --prefix=MyMovie --video=2pass --vpp-edgelevel="strength=4,threshold=28" --tune=uhq --bitrate=4250 --bitaud-51=400k --bitaud-20=150k
 ```
 
 **Clean Remux (Strip Title + Copy Streams):**
