@@ -521,8 +521,14 @@ class BatchEncoder
             echo "    Video: {$probeData['width']}x{$probeData['height']} ({$probeData['video_codec']})\n";
             if ($probeData['is_hdr']) {
                 echo "    HDR:   Yes [{$probeData['hdr_mastering']}]\n";
+                if (!empty($probeData['max_cll'])) {
+                    echo "    MaxCLL: {$probeData['max_cll']} cd/m² | MaxFALL: " . ($probeData['max_fall'] ?? 'N/A') . " cd/m²\n";
+                }
             } else {
                 echo "    HDR:   No\n";
+            }
+            if (!empty($probeData['chroma_location'])) {
+                echo "    Chroma: {$probeData['chroma_location']}\n";
             }
             echo "    Audio: {$probeData['audio_codec']} ({$probeData['audio_channels']}ch)\n";
             
@@ -763,11 +769,22 @@ class BatchEncoder
 
             $colorParams = "";
             $hdrParams   = "";
+            $chromaParams = "";
+            $cllParams   = "";
+
+            // Chroma location (applies to both HDR and SDR)
+            if (!empty($probeData['chroma_location'])) {
+                $chromaParams = "--chromaloc " . $probeData['chroma_location'];
+            }
 
             if ($probeData['is_hdr']) {
                 $colorParams = "--transfer smpte2084 --colorprim bt2020 --colormatrix bt2020nc";
                 if (!empty($probeData['hdr_mastering'])) {
                     $hdrParams = '--master-display "' . $probeData['hdr_mastering'] . '"';
+                }
+                if (!empty($probeData['max_cll'])) {
+                    $fall = $probeData['max_fall'] ?? '0';
+                    $cllParams = "--max-cll {$probeData['max_cll']},{$fall}";
                 }
                 echo "  [Auto-Spec]: Detected HDR. Using BT.2020 color matrix.\n";
             } else {
@@ -788,7 +805,7 @@ class BatchEncoder
             $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
             $finMkv = $this->wrkPath . $this->swapExt($fileName, 'mkv');
 
-            $currentVidOptions = trim($this->finalVidOptions . " $colorParams $hdrParams");
+            $currentVidOptions = trim($this->finalVidOptions . " $colorParams $hdrParams $chromaParams $cllParams");
 
             // Format Commands (Use toWinPath() here for the Batch File content)
 
@@ -864,12 +881,19 @@ class BatchEncoder
             // Appended dynamically (e.g. -map_chapters 2 -map 3:0...)
             $muxMaps   .= " $chapterMapArgs $subMaps";
 
+            // Video language metadata
+            $videoMeta = "";
+            if (!empty($probeData['video_lang'])) {
+                $videoMeta = "-metadata:s:v:0 language=" . $probeData['video_lang'];
+            }
+
             // Generate Final Command
-            $muxerJob = sprintf('%s %s %s %s -c copy "%s"' . "\n",
+            $muxerJob = sprintf('%s %s %s %s %s -c copy "%s"' . "\n",
                 $muxCmd,
                 $muxInputs,
                 $muxMaps,
                 $metaArgs,
+                $videoMeta,
                 $this->toWinPath($finMkv)
             );
 

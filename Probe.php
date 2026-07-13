@@ -3,10 +3,11 @@
 class Probe
 {
     // Returns: [
-    //    'width', 'height', 'video_codec', 'is_hdr', 'hdr_mastering', 'primaries', 
+    //    'width', 'height', 'video_codec', 'is_hdr', 'hdr_mastering', 'primaries',
+    //    'chroma_location', 'color_transfer', 'color_space', 'max_cll', 'max_fall',
     //    'audio_codec', 'audio_channels', // (Legacy/Main track info)
     //    'audio_tracks' => [], // (List of all audio streams)
-    //    'subtitles' => [], 
+    //    'subtitles' => [],
     //    'chapters' => bool
     // ]
     public static function analyze($filePath) {
@@ -34,9 +35,13 @@ class Probe
         if (!$data1) return null; // Data1 is critical. Data2 is optional (HDR only).
 
         // Init
-        $width = 0; $height = 0; 
-        $primaries = null; 
+        $width = 0; $height = 0;
+        $primaries = null;
+        $chromaLoc = null;
+        $colorTransfer = null;
+        $colorSpace = null;
         $videoCodec = 'unknown';
+        $videoLang = null;
 
         $audioTracks = []; // Collection for all audio streams
         $subtitles = [];
@@ -69,7 +74,12 @@ class Probe
                             $width = intval($stream->width ?? 0);
                             $height = intval($stream->height ?? 0);
                             $primaries = $stream->color_primaries ?? null;
+                            $chromaLoc = $stream->chroma_location ?? null;
+                            $colorTransfer = $stream->color_transfer ?? null;
+                            $colorSpace = $stream->color_space ?? null;
                             $videoCodec = $stream->codec_name ?? 'unknown';
+                            $vTags = $stream->tags ?? null;
+                            $videoLang = $getTag($vTags, 'language');
                         }
                     }
                     
@@ -130,13 +140,24 @@ class Probe
 
         // Parse HDR
         $hdrString = null;
+        $maxCll = null;
+        $maxFall = null;
         if ($data2 && !empty($data2->frames)) {
             foreach ($data2->frames as $frame) {
                 if (!empty($frame->side_data_list)) {
                     foreach ($frame->side_data_list as $sd) {
-                        if (isset($sd->side_data_type) && $sd->side_data_type === "Mastering display metadata") {
-                            $hdrString = self::formatMasteringString($sd);
-                            break 2; 
+                        if (isset($sd->side_data_type)) {
+                            if ($sd->side_data_type === "Mastering display metadata") {
+                                $hdrString = self::formatMasteringString($sd);
+                            }
+                            elseif ($sd->side_data_type === "Content light level metadata") {
+                                $maxCll  = isset($sd->max_content) ? intval(explode('/', $sd->max_content)[0]) : null;
+                                $maxFall = isset($sd->max_average) ? intval(explode('/', $sd->max_average)[0]) : null;
+                            }
+                        }
+                        // Stop scanning frames once we have everything we need
+                        if ($hdrString !== null && $maxCll !== null) {
+                            break 2;
                         }
                     }
                 }
@@ -147,17 +168,23 @@ class Probe
             'width'          => $width,
             'height'         => $height,
             'video_codec'    => $videoCodec,
+            'video_lang'     => $videoLang,
             'is_hdr'         => ($hdrString !== null),
             'hdr_mastering'  => $hdrString,
             'primaries'      => $primaries,
-            
+            'chroma_location' => $chromaLoc,
+            'color_transfer' => $colorTransfer,
+            'color_space'    => $colorSpace,
+            'max_cll'        => $maxCll,
+            'max_fall'       => $maxFall,
+
             // Legacy Keys (For current BatchEncoder compatibility)
             'audio_codec'    => $legacyAudioCodec,
             'audio_channels' => $legacyAudioChannels,
-            
+
             // New Data
             'audio_tracks'   => $audioTracks,
-            
+
             'subtitles'      => $subtitles,
             'has_chapters'   => $hasChapters,
         ];
