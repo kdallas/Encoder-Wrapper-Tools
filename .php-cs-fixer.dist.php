@@ -20,4 +20,9 @@ return (new PhpCsFixer\Config())
     // core.autocrlf=true checks these files out as CRLF while git stores them as LF.
     // Match the checkout, or the writer emits LF and every run rewrites all 1087
     // lines of BatchEncoder.php, burying the real formatting diff.
-    ->setLineEnding("\r\n");
+    ->setLineEnding("\r\n")
+    // The cache file lives next to the config, and that directory sits on an SMB
+    // share where php-cs-fixer cannot write it. Without this, even a read-only
+    // --dry-run aborts trying to save the cache; every run would need
+    // --using-cache=no. Disable it here instead.
+    ->setUsingCache(false);
