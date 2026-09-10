@@ -34,6 +34,29 @@ class BatchEncoder
     private $finalVidOptions = "";
     private $finalAudOptions = "";
 
+    /**
+     * Flags that require a "=value". A bare "--flag" would otherwise fall through to
+     * the dynamic-args catch-all and be silently handed to NVEncC as a boolean switch.
+     * Values are example usages, shown in the error message.
+     */
+    private const VALUE_FLAGS = [
+        '--path'         => '--path="D:/Media/Show"',
+        '--prefix'       => '--prefix=MyShow',
+        '--custom-mux'   => '--custom-mux="mux-params.txt"',
+        '--custom-props' => '--custom-props="props.txt"',
+        '--langs'        => '--langs=eng,jpn',
+        '--default-lang' => '--default-lang=eng',
+        '--out-path'     => '--out-path="R:/temp-stuff/_encodes/"',
+        '--job-path'     => '--job-path="./output/"',
+        '--video'        => '--video=2pass',
+        '--audio'        => '--audio=opus-5.1',
+        '--resize'       => '--resize=1920x1080',
+        '--crop'         => '--crop=0,140,0,140',
+        '--vpp'          => '--vpp=deband',
+        '--title'        => '--title="My Show" (or --title="" to strip the title)',
+        '--skip-size'    => '--skip-size=500MB',
+    ];
+
     public function __construct($argv) {
         try {
             // Initialize Defaults (Sanitized immediately)
@@ -230,6 +253,10 @@ class BatchEncoder
             elseif ($arg === '--recursive') {
                 $this->recursive = true;
             }
+            elseif (isset(self::VALUE_FLAGS[$arg])) {
+                // Caught before the catch-all so a value-less flag fails loudly
+                throw new Exception("{$arg} requires a value. Example: " . self::VALUE_FLAGS[$arg]);
+            }
             elseif (str_starts_with($arg, '--')) {
                 // Dynamic args (e.g. --q=20)
                 $cleanArg = substr($arg, 2); 
@@ -253,22 +280,38 @@ class BatchEncoder
 
     /**
      * HELPER: Formats a byte count as a human-readable MB/GB string.
+     * Never emits KB, since --skip-size only accepts MB/GB values.
      */
     private function humanSize($bytes) {
         if ($bytes >= 1024 ** 3) return round($bytes / 1024 ** 3, 2) . ' GB';
-        if ($bytes >= 1024 ** 2) return round($bytes / 1024 ** 2, 2) . ' MB';
-        return round($bytes / 1024, 2) . ' KB';
+        return round($bytes / 1024 ** 2, 2) . ' MB';
     }
 
     /**
      * HELPER: Robust file size check (tries Unix-style path first, then Windows-style).
+     * Returns bytes, or false when the size cannot be determined (caller skips the filter).
      */
     private function getFileSize($path) {
-        $size = @filesize($path);
-        if ($size === false) {
-            $size = @filesize($this->toWinPath($path));
+        foreach ([$path, $this->toWinPath($path)] as $candidate) {
+            if (!file_exists($candidate)) {
+                continue;
+            }
+
+            // Convert the E_WARNING filesize() raises on failure into a catchable error.
+            set_error_handler(static function ($severity, $message) {
+                throw new ErrorException($message);
+            });
+            try {
+                return filesize($candidate);
+            } catch (ErrorException $e) {
+                echo "  [Skip-Size]: Warning: could not read size of " . basename($candidate)
+                    . " ({$e->getMessage()}). File will not be size-filtered.\n";
+                return false;
+            } finally {
+                restore_error_handler();
+            }
         }
-        return $size;
+        return false;
     }
 
     private function validateInputs() {
@@ -280,6 +323,11 @@ class BatchEncoder
         }
         if (($this->vidOnly || $this->audOnly) && $this->skipSizeBytes <= 0) {
             throw new Exception("--vid-only/--aud-only are companions to --skip-size and require it to be set.");
+        }
+        if ($this->skipSizeBytes > 0 && (!empty($this->customMuxFile) || !empty($this->customPropsFile))) {
+            throw new Exception("--skip-size is not supported with --custom-mux/--custom-props. "
+                . "Those workflows pair files across --path inputs, so dropping individual files breaks the "
+                . "input mapping. Filter the source list before running instead.");
         }
 
         if (!empty($this->customMuxFile)) {
@@ -649,8 +697,9 @@ class BatchEncoder
             // Chapter Logic (Map from Source)
             $chapterMapArgs = "";
             if ($probeData['has_chapters']) {
-                if ($isVidPassthrough) {
-                    // Source already present as mux input 0 (vid-only passthrough); don't add it twice
+                if ($isVideoCopy) {
+                    // Source is already mux input 0 (global --video=copy, or a vid-only rescue);
+                    // re-adding it would open the same file twice.
                     $chapterMapArgs = " -map_chapters 0";
                 } elseif ($srcIsMuxInput) {
                     // Source already present as mux input 1 (aud-only); don't add it twice
@@ -714,7 +763,10 @@ class BatchEncoder
             $audDispStr = "";
             $finalAudOptsStr = "";
             $outAudIndex = 0;
-            
+            // Per-file copy of --default-lang: consumed by the first matching track in THIS file,
+            // so every file in the batch gets its default flagged (not just the first file).
+            $defaultLangPending = $this->defaultLang;
+
             echo "  [Audio Processing]:\n";
 
             foreach ($keepTracks as $track) {
@@ -836,10 +888,10 @@ class BatchEncoder
 
                 // 5. Flags / Disposition
                 $isDef = 0;
-                if (!empty($this->defaultLang)) {
-                    if (strtolower($track['lang']) === $this->defaultLang) {
+                if ($defaultLangPending !== "") {
+                    if (strtolower($track['lang']) === $defaultLangPending) {
                         $isDef = 1;
-                        $this->defaultLang = ""; // Only flag the first match
+                        $defaultLangPending = ""; // Only flag the first matching track per file
                     }
                 } elseif ($track['default']) {
                     $isDef = 1;

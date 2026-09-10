@@ -96,7 +96,9 @@ Run the application from the terminal using the following syntax:
 | `--path` | **Required.** The source path. Can be used multiple times for multi-source merging. |
 | `--prefix` | **Required.** A unique name for the job batch (names the output `.ps1` files). |
 | `--recursive` | Enables recursive scanning of subdirectories. |
-| `--skip-size` | Skips source files smaller than the given size, excluding them from all generated `.ps1` outputs (Format: `500MB` or `1.5GB`; decimal values allowed). MB/GB are treated as binary units (MiB/GiB). |
+| `--out-path` | Overrides the work path where intermediate/final media is written (default: `DEFAULT_WRK_PATH` from `.env.yaml`). |
+| `--job-path` | Overrides the directory the generated `.ps1` scripts are written to (default: `DEFAULT_JOB_PATH` from `.env.yaml`). |
+| `--skip-size` | Skips source files smaller than the given size, excluding them from all generated `.ps1` outputs (Format: `500MB` or `1.5GB`; decimal values allowed). MB/GB are treated as binary units (MiB/GiB). Standard workflow only — rejected with `--custom-mux`/`--custom-props`, since those pair files across `--path` inputs and dropping individual files would break the input mapping. |
 | `--vid-only` | Companion to `--skip-size`. Size-matched files are rescued instead of dropped: the video encode is skipped and the final mux takes video from the original source (audio/subs/chapters still processed). Requires `--skip-size`; mutually exclusive with `--aud-only`. |
 | `--aud-only` | Companion to `--skip-size`. Size-matched files are rescued instead of dropped: the audio encode is skipped and the final mux takes the selected audio tracks from the original source (video/subs/chapters still processed). Requires `--skip-size`; mutually exclusive with `--vid-only`. |
 | `--custom-mux` | Path to a text file containing raw `ffmpeg` args for custom remuxing jobs. |
@@ -112,6 +114,8 @@ Run the application from the terminal using the following syntax:
 | `--bitaud` | (Also `--abitrate`). Sets global target bitrate for Opus audio transcode (e.g., `--bitaud=300k`). |
 | `--bitaud-51` | Overrides target bitrate specifically for 5.1/7.1 channel downmix/encodes (e.g., `--bitaud-51=400k`). |
 | `--bitaud-20` | Overrides target bitrate specifically for stereo/mono channel downmix/encodes (e.g., `--bitaud-20=150k`). |
+| `--langs` | Comma-separated language codes. Only matching audio tracks are kept and encoded (e.g., `--langs=eng,jpn`). If nothing matches, all tracks are kept with a warning. Default: keep all tracks. |
+| `--default-lang` | Marks the first audio track matching this language as the default track in each output file (e.g., `--default-lang=eng`). In each file, only the first match is flagged. Falls back to the source file's own default flag when unset. |
 
 <br>
 
