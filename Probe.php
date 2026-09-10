@@ -20,22 +20,29 @@ class Probe
         // --- PASS 1: Metadata (Headers) ---
         // We removed the restrictive "show_entries" filter for streams.
         // We now use -show_streams -show_chapters to get EVERYTHING (including tags/language).
-        $cmd1 = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_chapters -show_streams -i "%s" 2>&1',
-            $ffprobe, $filePath
+        $cmd1 = sprintf(
+            '"%s" -hide_banner -loglevel warning -print_format json -show_chapters -show_streams -i "%s" 2>&1',
+            $ffprobe,
+            $filePath
         );
         $data1 = self::getJsonOutput($cmd1);
 
         // --- PASS 2: HDR Data (Packets) ---
         // We scan 50 packets to find the Video Frame Side Data (Mastering Display Metadata).
-        $cmd2 = sprintf('"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -i "%s" 2>&1',
-            $ffprobe, $filePath
+        $cmd2 = sprintf(
+            '"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -i "%s" 2>&1',
+            $ffprobe,
+            $filePath
         );
         $data2 = self::getJsonOutput($cmd2);
 
-        if (!$data1) return null; // Data1 is critical. Data2 is optional (HDR only).
+        if (!$data1) {
+            return null;
+        } // Data1 is critical. Data2 is optional (HDR only).
 
         // Init
-        $width = 0; $height = 0;
+        $width = 0;
+        $height = 0;
         $primaries = null;
         $chromaLoc = null;
         $colorTransfer = null;
@@ -47,13 +54,19 @@ class Probe
         $subtitles = [];
 
         // Helper: Case-insensitive property getter for Tags
-        $getTag = function($obj, $key) {
-            if (empty($obj) || !is_object($obj)) return null;
+        $getTag = function ($obj, $key) {
+            if (empty($obj) || !is_object($obj)) {
+                return null;
+            }
             // Check exact match first
-            if (isset($obj->$key)) return $obj->$key;
+            if (isset($obj->$key)) {
+                return $obj->$key;
+            }
             // Check case-insensitive
             foreach ($obj as $k => $v) {
-                if (strcasecmp($k, $key) === 0) return $v;
+                if (strcasecmp($k, $key) === 0) {
+                    return $v;
+                }
             }
             return null;
         };
@@ -62,7 +75,7 @@ class Probe
         if (isset($data1->streams)) {
             foreach ($data1->streams as $stream) {
                 if (isset($stream->codec_type)) {
-                    
+
                     // --- VIDEO ---
                     if ($stream->codec_type === 'video') {
                         // Check for Cover Art / Attached Pictures
@@ -82,7 +95,7 @@ class Probe
                             $videoLang = $getTag($vTags, 'language');
                         }
                     }
-                    
+
                     // --- AUDIO ---
                     elseif ($stream->codec_type === 'audio') {
                         $tags = $stream->tags ?? null;
@@ -103,17 +116,17 @@ class Probe
                             'forced'   => $isForced
                         ];
                     }
-                    
+
                     // --- SUBTITLES ---
                     elseif ($stream->codec_type === 'subtitle') {
                         // Capture Subtitle Data
                         $tags = $stream->tags ?? null;
                         $disp = $stream->disposition ?? null;
-                        
+
                         // Now that we have the full stream object, getTag will find 'language' or 'LANGUAGE'
                         $lang = $getTag($tags, 'language') ?? 'und';
                         $title = $getTag($tags, 'title') ?? '';
-                        
+
                         $forced = isset($disp->forced) ? $disp->forced : 0;
                         $sdh    = isset($disp->hearing_impaired) ? $disp->hearing_impaired : 0;
 
@@ -149,8 +162,7 @@ class Probe
                         if (isset($sd->side_data_type)) {
                             if ($sd->side_data_type === "Mastering display metadata") {
                                 $hdrString = self::formatMasteringString($sd);
-                            }
-                            elseif ($sd->side_data_type === "Content light level metadata") {
+                            } elseif ($sd->side_data_type === "Content light level metadata") {
                                 $maxCll  = isset($sd->max_content) ? intval(explode('/', $sd->max_content)[0]) : null;
                                 $maxFall = isset($sd->max_average) ? intval(explode('/', $sd->max_average)[0]) : null;
                             }
@@ -194,17 +206,23 @@ class Probe
         $rawOutput = shell_exec($cmd);
         $first = strpos($rawOutput, '{');
         $last  = strrpos($rawOutput, '}');
-        if ($first === false || $last === false) return null;
+        if ($first === false || $last === false) {
+            return null;
+        }
         $json = substr($rawOutput, $first, ($last - $first + 1));
         return json_decode($json);
     }
 
     private static function formatMasteringString($sd) {
-        $get = fn($val) => explode('/', $val ?? '0')[0];
-        $gx = $get($sd->green_x ?? null); $gy = $get($sd->green_y ?? null);
-        $bx = $get($sd->blue_x ?? null);  $by = $get($sd->blue_y ?? null);
-        $rx = $get($sd->red_x ?? null);   $ry = $get($sd->red_y ?? null);
-        $wx = $get($sd->white_point_x ?? null); $wy = $get($sd->white_point_y ?? null);
+        $get = fn ($val) => explode('/', $val ?? '0')[0];
+        $gx = $get($sd->green_x ?? null);
+        $gy = $get($sd->green_y ?? null);
+        $bx = $get($sd->blue_x ?? null);
+        $by = $get($sd->blue_y ?? null);
+        $rx = $get($sd->red_x ?? null);
+        $ry = $get($sd->red_y ?? null);
+        $wx = $get($sd->white_point_x ?? null);
+        $wy = $get($sd->white_point_y ?? null);
         $maxL = $get($sd->max_luminance ?? null);
         $minL = $get($sd->min_luminance ?? null);
         return "G({$gx},{$gy})B({$bx},{$by})R({$rx},{$ry})WP({$wx},{$wy})L({$maxL},{$minL})";

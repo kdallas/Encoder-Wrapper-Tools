@@ -8,15 +8,15 @@ class Profiles
      * variables to the video encoder.
      */
     private static function formatVideoExtraArgs($args, $handledKeys = []) {
-        $audioKeys = ['abitrate', 'bitaud']; 
+        $audioKeys = ['abitrate', 'bitaud'];
         $exclude = array_merge($handledKeys, $audioKeys);
-        
+
         $extraStr = "";
         foreach ($args as $key => $value) {
             if (in_array($key, $exclude)) {
                 continue;
             }
-            
+
             if ($value === true) {
                 $extraStr .= " --{$key}";
             } elseif ($value !== false) {
@@ -34,20 +34,20 @@ class Profiles
 
     public static function getVideo() {
         return [
-            '2pass' => function($args) {
+            '2pass' => function ($args) {
                 $bitrate = $args['bitrate'] ?? $args['bitvid'] ?? '1200';
                 $base = "--vbr $bitrate --multipass 2pass-full --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --aq --mv-precision Q-pel --lookahead 32 --avhw";
 
                 // Append safe extra args (excluding the bitrates we just used)
                 return $base . self::formatVideoExtraArgs($args, ['bitrate', 'bitvid']);
             },
-            'cqp' => function($args) {
+            'cqp' => function ($args) {
                 $q = $args['q'] ?? '20';
                 $base = "--cqp $q --codec h265 --preset quality --level auto --output-depth 10 --aq-temporal --aq --mv-precision Q-pel --lookahead 32 --avhw";
 
                 return $base . self::formatVideoExtraArgs($args, ['q']);
             },
-            'basic' => function($args) {
+            'basic' => function ($args) {
                 // Intercept the bitrate so it neatly replaces the 1200 base if specified
                 $bitrate = $args['bitrate'] ?? $args['bitvid'] ?? '1200';
                 $base = "--vbr $bitrate --multipass 2pass-full --codec h265 --preset quality --level auto --output-depth 10";
@@ -61,25 +61,25 @@ class Profiles
 
     public static function getAudio() {
         return [
-            'opus-8-6' => function($args) {
+            'opus-8-6' => function ($args) {
                 // Check for 5.1 override, then global, then default
                 $ab = $args['bitaud-51'] ?? $args['abitrate'] ?? $args['bitaud'] ?? '320k';
                 return "-c:a libopus -b:a $ab " . '-vbr on -ac 6 -af "pan=5.1|FL=FL+0.5*BL+0.5*LFE|FR=FR+0.5*BR+0.5*LFE|FC=FC|BL=0.5*BL+0.5*LFE|BR=0.5*BR+0.5*LFE"';
             },
-            'opus-5.1' => function($args) {
+            'opus-5.1' => function ($args) {
                 $ab = $args['bitaud-51'] ?? $args['abitrate'] ?? $args['bitaud'] ?? '224k';
                 return "-c:a libopus -b:a $ab " . '-af "channelmap=channel_layout=5.1"';
             },
-            'aac-opus' => function($args) {
+            'aac-opus' => function ($args) {
                 // Generic profile, relies on global bitaud
                 $ab = $args['abitrate'] ?? $args['bitaud'] ?? '224k';
                 return "-c:a libopus -b:a $ab ";
             },
-            'opus-pans' => function($args) {
+            'opus-pans' => function ($args) {
                 $ab = $args['bitaud-20'] ?? $args['abitrate'] ?? $args['bitaud'] ?? '128k';
                 return "-c:a libopus -b:a $ab " . '-af "volume=1.65,pan=stereo|FL=0.5*FC+0.707*FL+0.707*BL+0.5*LFE|FR=0.5*FC+0.707*FR+0.707*BR+0.5*LFE"';
             },
-            'opus-stereo' => function($args) {
+            'opus-stereo' => function ($args) {
                 $ab = $args['bitaud-20'] ?? $args['abitrate'] ?? $args['bitaud'] ?? '100k';
                 return "-c:a libopus -b:a $ab -ac 2";
             },

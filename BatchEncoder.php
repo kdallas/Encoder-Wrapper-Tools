@@ -71,8 +71,12 @@ class BatchEncoder
                 $this->resolveProfiles();
             } else {
                 echo "Mode: Custom Job (skipping profile resolution)\n";
-                if ($this->customMuxFile) echo "Type: Mux Passthrough ({$this->customMuxFile})\n";
-                if ($this->customPropsFile) echo "Type: Property Edit ({$this->customPropsFile})\n";
+                if ($this->customMuxFile) {
+                    echo "Type: Mux Passthrough ({$this->customMuxFile})\n";
+                }
+                if ($this->customPropsFile) {
+                    echo "Type: Property Edit ({$this->customPropsFile})\n";
+                }
                 echo "Output Path (Work): {$this->wrkPath}\n";
                 echo "Output Path (Jobs): {$this->jobPath}\n\n";
             }
@@ -86,25 +90,23 @@ class BatchEncoder
         try {
             // Group files by normalized filename (e.g. "S01E01" -> [Path1, Path2])
             $fileSets = $this->scanAndGroupTargets();
-            
+
             if (!empty($this->customMuxFile)) {
                 // 1. Custom Mux Workflow (Merging multiple inputs)
                 $this->generateCustomMuxFiles($fileSets);
-            } 
-            elseif (!empty($this->customPropsFile)) {
+            } elseif (!empty($this->customPropsFile)) {
                 // 2. Custom Props Workflow (Copy + Edit)
                 // Flatten the groups: We only edit the first file found for each name
                 $flatList = [];
                 foreach ($fileSets as $key => $paths) {
-                     $flatList[] = $paths[0]; 
+                    $flatList[] = $paths[0];
                 }
                 $this->generateCustomPropsFiles($flatList);
-            }
-            else {
+            } else {
                 // 3. Standard Encode Workflow
                 $flatList = [];
                 foreach ($fileSets as $key => $paths) {
-                     $flatList[] = $paths[0]; 
+                    $flatList[] = $paths[0];
                 }
                 $this->generateBatchFiles($flatList);
             }
@@ -117,7 +119,7 @@ class BatchEncoder
 
     /**
      * CENTRAL PATH CLEANER
-     * Converts everything to Forward Slashes (/) for internal consistency 
+     * Converts everything to Forward Slashes (/) for internal consistency
      * and Git Bash compatibility.
      */
     private function sanitizePath($path, $isDir = false) {
@@ -153,7 +155,7 @@ class BatchEncoder
         if ($isDir && !str_ends_with($clean, '/')) {
             $clean .= '/';
         }
-        
+
         if (!$isDir && str_ends_with($clean, '/')) {
             $clean = rtrim($clean, '/');
         }
@@ -180,28 +182,29 @@ class BatchEncoder
 
         for ($i = 1; $i < count($argv); $i++) {
             $arg = $argv[$i];
-            
+
             if (str_starts_with($arg, '--path=')) {
                 $raw = substr($arg, 7);
                 // Stitch spaces if path was unquoted
                 for ($j = $i + 1; $j < count($argv); $j++) {
-                    if (str_starts_with($argv[$j], '-')) break; 
+                    if (str_starts_with($argv[$j], '-')) {
+                        break;
+                    }
                     $raw .= " " . $argv[$j];
                     $i++;
                 }
                 // Sanitize immediately (False for $isDir, because it might be a file), then add to array
                 $this->pathInputs[] = $this->sanitizePath($raw, false);
-            } 
-            elseif (str_starts_with($arg, '--custom-mux=')) {
+            } elseif (str_starts_with($arg, '--custom-mux=')) {
                 $this->customMuxFile = $this->sanitizePath(substr($arg, 13), false);
-            }
-            elseif (str_starts_with($arg, '--custom-props=')) {
+            } elseif (str_starts_with($arg, '--custom-props=')) {
                 $this->customPropsFile = $this->sanitizePath(substr($arg, 15), false);
-            }
-            elseif (str_starts_with($arg, '--prefix=')) {
+            } elseif (str_starts_with($arg, '--prefix=')) {
                 $this->prefixInput = substr($arg, 9);
                 for ($j = $i + 1; $j < count($argv); $j++) {
-                    if (str_starts_with($argv[$j], '-')) break;
+                    if (str_starts_with($argv[$j], '-')) {
+                        break;
+                    }
                     $this->prefixInput .= " " . $argv[$j];
                     $i++;
                 }
@@ -213,53 +216,39 @@ class BatchEncoder
             // Default Lang Selection
             elseif (str_starts_with($arg, '--default-lang=')) {
                 $this->defaultLang = strtolower(substr($arg, 15));
-            }
-            elseif (str_starts_with($arg, '--out-path=')) {
+            } elseif (str_starts_with($arg, '--out-path=')) {
                 // User override for Work Path -> Force Dir
                 $this->wrkPath = $this->sanitizePath(substr($arg, 11), true);
-            }
-            elseif (str_starts_with($arg, '--job-path=')) {
+            } elseif (str_starts_with($arg, '--job-path=')) {
                 // User override for Job Path -> Force Dir
                 $this->jobPath = $this->sanitizePath(substr($arg, 11), true);
-            }
-            elseif (str_starts_with($arg, '--video=')) {
+            } elseif (str_starts_with($arg, '--video=')) {
                 $this->videoProfileKey = substr($arg, 8);
-            }
-            elseif (str_starts_with($arg, '--audio=')) {
+            } elseif (str_starts_with($arg, '--audio=')) {
                 $this->audioProfileKey = substr($arg, 8);
-            }
-            elseif (str_starts_with($arg, '--resize=')) {
+            } elseif (str_starts_with($arg, '--resize=')) {
                 $this->resizeInput = substr($arg, 9);
-            }
-            elseif (str_starts_with($arg, '--crop=')) {
+            } elseif (str_starts_with($arg, '--crop=')) {
                 $this->cropInput = substr($arg, 7);
-            }
-            elseif (str_starts_with($arg, '--vpp=')) {
+            } elseif (str_starts_with($arg, '--vpp=')) {
                 $this->vppInput = substr($arg, 6);
-            }
-            elseif (str_starts_with($arg, '--title=')) {
+            } elseif (str_starts_with($arg, '--title=')) {
                 // " --title=" results in empty string, effectively removing it
-                $this->titleInput = substr($arg, 8); 
-            }
-            elseif (str_starts_with($arg, '--skip-size=')) {
+                $this->titleInput = substr($arg, 8);
+            } elseif (str_starts_with($arg, '--skip-size=')) {
                 $this->skipSizeBytes = $this->parseSizeArg(substr($arg, 12));
-            }
-            elseif ($arg === '--vid-only') {
+            } elseif ($arg === '--vid-only') {
                 $this->vidOnly = true;
-            }
-            elseif ($arg === '--aud-only') {
+            } elseif ($arg === '--aud-only') {
                 $this->audOnly = true;
-            }
-            elseif ($arg === '--recursive') {
+            } elseif ($arg === '--recursive') {
                 $this->recursive = true;
-            }
-            elseif (isset(self::VALUE_FLAGS[$arg])) {
+            } elseif (isset(self::VALUE_FLAGS[$arg])) {
                 // Caught before the catch-all so a value-less flag fails loudly
                 throw new Exception("{$arg} requires a value. Example: " . self::VALUE_FLAGS[$arg]);
-            }
-            elseif (str_starts_with($arg, '--')) {
+            } elseif (str_starts_with($arg, '--')) {
                 // Dynamic args (e.g. --q=20)
-                $cleanArg = substr($arg, 2); 
+                $cleanArg = substr($arg, 2);
                 $parts = explode('=', $cleanArg, 2);
                 $this->extraArgs[$parts[0]] = $parts[1] ?? true;
             }
@@ -283,7 +272,9 @@ class BatchEncoder
      * Never emits KB, since --skip-size only accepts MB/GB values.
      */
     private function humanSize($bytes) {
-        if ($bytes >= 1024 ** 3) return round($bytes / 1024 ** 3, 2) . ' GB';
+        if ($bytes >= 1024 ** 3) {
+            return round($bytes / 1024 ** 3, 2) . ' GB';
+        }
         return round($bytes / 1024 ** 2, 2) . ' MB';
     }
 
@@ -315,8 +306,12 @@ class BatchEncoder
     }
 
     private function validateInputs() {
-        if (empty($this->pathInputs)) { throw new Exception("Missing --path value(s)"); }
-        if (empty($this->prefixInput)) { throw new Exception("Missing --prefix value"); }
+        if (empty($this->pathInputs)) {
+            throw new Exception("Missing --path value(s)");
+        }
+        if (empty($this->prefixInput)) {
+            throw new Exception("Missing --prefix value");
+        }
 
         if ($this->vidOnly && $this->audOnly) {
             throw new Exception("--vid-only and --aud-only are mutually exclusive. Use --video=copy --audio=copy for a full passthrough remux.");
@@ -331,14 +326,14 @@ class BatchEncoder
         }
 
         if (!empty($this->customMuxFile)) {
-             if (!file_exists($this->customMuxFile) && !file_exists($this->toWinPath($this->customMuxFile))) {
-                 throw new Exception("Custom mux file not found: {$this->customMuxFile}");
-             }
+            if (!file_exists($this->customMuxFile) && !file_exists($this->toWinPath($this->customMuxFile))) {
+                throw new Exception("Custom mux file not found: {$this->customMuxFile}");
+            }
         }
         if (!empty($this->customPropsFile)) {
-             if (!file_exists($this->customPropsFile) && !file_exists($this->toWinPath($this->customPropsFile))) {
-                 throw new Exception("Custom props file not found: {$this->customPropsFile}");
-             }
+            if (!file_exists($this->customPropsFile) && !file_exists($this->toWinPath($this->customPropsFile))) {
+                throw new Exception("Custom props file not found: {$this->customPropsFile}");
+            }
         }
     }
 
@@ -356,9 +351,9 @@ class BatchEncoder
         $rawVid = $vidProfiles[$this->videoProfileKey];
         // Check for Video Copy Mode
         if ($this->videoProfileKey === 'copy') {
-             $this->finalVidOptions = 'copy';
+            $this->finalVidOptions = 'copy';
         } else {
-             $this->finalVidOptions = is_callable($rawVid) ? $rawVid($this->extraArgs) : $rawVid;
+            $this->finalVidOptions = is_callable($rawVid) ? $rawVid($this->extraArgs) : $rawVid;
         }
 
         $rawAud = $audProfiles[$this->audioProfileKey];
@@ -419,7 +414,7 @@ class BatchEncoder
             // Robust Check: Try Unix path first, then Windows path
             $existsFile = is_file($inputPath) || is_file($this->toWinPath($inputPath));
             $existsDir  = is_dir($inputPath)  || is_dir($this->toWinPath($inputPath));
-            
+
             $foundFiles = [];
 
             if ($existsFile) {
@@ -435,10 +430,10 @@ class BatchEncoder
                 $found = ScanDir::scan($scanPath, $srcExts, $this->recursive);
 
                 // ScanDir might return mixed slashes depending on OS; unify them here for safety.
-                $foundFiles = array_map(fn($p) => $this->sanitizePath($p, false), $found);
+                $foundFiles = array_map(fn ($p) => $this->sanitizePath($p, false), $found);
             } else {
-                 echo "Warning: Path not found: $inputPath\n";
-                 continue;
+                echo "Warning: Path not found: $inputPath\n";
+                continue;
             }
 
             // Grouping Logic
@@ -464,7 +459,7 @@ class BatchEncoder
                     }
                 }
                 $info = pathinfo($file);
-                $baseName = $info['filename']; 
+                $baseName = $info['filename'];
                 // Determine Key (Base Name)
                 // Note: For parallel matching to work, filenames must match between folders!
                 //       Uses Normalized Key for matching (ignores punctuation/case)
@@ -505,22 +500,24 @@ class BatchEncoder
         $rawParams = file_get_contents($this->customMuxFile);
         // Collapse newlines into spaces
         $cleanParams = trim(preg_replace('/\s+/', ' ', $rawParams));
-        
+
         // Ensure Directory
         if (!is_dir($this->jobPath)) {
             mkdir($this->jobPath, 0777, true);
         }
 
         $mergeBat = $this->jobPath . $this->prefixInput . '_mux.ps1';
-        if(file_exists($mergeBat)) unlink($mergeBat);
+        if (file_exists($mergeBat)) {
+            unlink($mergeBat);
+        }
 
         $encCmd = $this->toWinPath(Config::get('MKV_MUX')); // Usually ffmpeg
 
         foreach ($fileSets as $baseName => $sources) {
-            // Check if we have enough sources? 
+            // Check if we have enough sources?
             // The user might supply 1 path (internal edit) or 2+ (merge).
             // We just pass them all in order.
-            
+
             $inputArgs = "";
             foreach ($sources as $src) {
                 $inputArgs .= sprintf(' -i "%s"', $this->toWinPath($src));
@@ -532,7 +529,8 @@ class BatchEncoder
             $originalName = pathinfo($sources[0], PATHINFO_FILENAME);
             $finalMkv = $this->wrkPath . $originalName . '.mkv';
 
-            $cmd = sprintf('%s %s %s "%s"' . "\n",
+            $cmd = sprintf(
+                '%s %s %s "%s"' . "\n",
                 $encCmd,
                 $inputArgs,
                 $cleanParams,
@@ -542,7 +540,7 @@ class BatchEncoder
             echo "Queuing Custom Mux: $originalName (" . count($sources) . " sources)\n";
             file_put_contents($mergeBat, $cmd, FILE_APPEND);
         }
-        
+
         echo "\nDone. Created: $mergeBat\n";
     }
 
@@ -559,29 +557,33 @@ class BatchEncoder
         }
 
         $propBat = $this->jobPath . $this->prefixInput . '_props.ps1';
-        if(file_exists($propBat)) unlink($propBat);
+        if (file_exists($propBat)) {
+            unlink($propBat);
+        }
 
-        $toolCmd = $this->toWinPath(Config::get('MKV_PED')); 
+        $toolCmd = $this->toWinPath(Config::get('MKV_PED'));
 
         foreach ($files as $sourcePath) {
             $fileName = basename($sourcePath);
             $finalMkv = $this->wrkPath . $fileName;
 
             // 1. Copy Source -> Output
-            $copyCmd = sprintf('Copy-Item "%s" "%s"', 
-                $this->toWinPath($sourcePath), 
+            $copyCmd = sprintf(
+                'Copy-Item "%s" "%s"',
+                $this->toWinPath($sourcePath),
                 $this->toWinPath($finalMkv)
             );
 
             // 2. Run PropEdit on Output
-            $editCmd = sprintf('%s "%s" %s', 
-                $toolCmd, 
-                $this->toWinPath($finalMkv), 
+            $editCmd = sprintf(
+                '%s "%s" %s',
+                $toolCmd,
+                $this->toWinPath($finalMkv),
                 $cleanParams
             );
 
             echo "Queuing Custom Props: $fileName\n";
-            
+
             // Append commands to batch file
             file_put_contents($propBat, $copyCmd . "\n" . $editCmd . "\n", FILE_APPEND);
         }
@@ -604,11 +606,21 @@ class BatchEncoder
         $cleanBat = $this->jobPath . $this->prefixInput . '_del.ps1';
 
         // Reset output files
-        if(file_exists($videoBat)) unlink($videoBat);
-        if(file_exists($audioBat)) unlink($audioBat);
-        if(file_exists($subBat))   unlink($subBat);
-        if(file_exists($mergeBat)) unlink($mergeBat);
-        if(file_exists($cleanBat)) unlink($cleanBat);
+        if (file_exists($videoBat)) {
+            unlink($videoBat);
+        }
+        if (file_exists($audioBat)) {
+            unlink($audioBat);
+        }
+        if (file_exists($subBat)) {
+            unlink($subBat);
+        }
+        if (file_exists($mergeBat)) {
+            unlink($mergeBat);
+        }
+        if (file_exists($cleanBat)) {
+            unlink($cleanBat);
+        }
 
         $maxLength = 80;
 
@@ -619,25 +631,29 @@ class BatchEncoder
             // Partial-encode treatment: ONLY files rescued by the --skip-size filter
             $isVidPassthrough = isset($this->skipMatchedPaths[$cleanPath]) && $this->vidOnly;
             $isAudPassthrough = isset($this->skipMatchedPaths[$cleanPath]) && $this->audOnly;
-            if ($isVidPassthrough) echo "  [Skip-Size]: Video encode SKIPPED (vid-only). Mux will take video from source.\n";
-            if ($isAudPassthrough) echo "  [Skip-Size]: Audio encode SKIPPED (aud-only). Mux will take audio from source.\n";
+            if ($isVidPassthrough) {
+                echo "  [Skip-Size]: Video encode SKIPPED (vid-only). Mux will take video from source.\n";
+            }
+            if ($isAudPassthrough) {
+                echo "  [Skip-Size]: Audio encode SKIPPED (aud-only). Mux will take audio from source.\n";
+            }
             // Per-file video copy: global --video=copy OR vid-only rescue (reuses copy machinery)
             $isVideoCopy = ($this->videoProfileKey === 'copy') || $isVidPassthrough;
 
             // Probe Logic
             // FIX: Pass Windows Path to Probe for UNC compatibility
             $probeData = Probe::analyze($this->toWinPath($cleanPath));
-            
+
             if (!$probeData) {
                 echo "Warning: Could not analyze file $fileName. Using defaults.\n";
                 $probeData = [
-                    'video_codec'    => 'unknown', 
+                    'video_codec'    => 'unknown',
                     'width'          => 1920,
-                    'height'         => 1080, 
+                    'height'         => 1080,
                     'primaries'      => null,
-                    'is_hdr'         => false, 
+                    'is_hdr'         => false,
                     'has_chapters'   => false,
-                    'audio_codec'    => 'opus', 
+                    'audio_codec'    => 'opus',
                     'audio_channels' => 0,
                     'audio_tracks'   => [], // Ensure array exists
                     'subtitles'      => [],
@@ -659,7 +675,7 @@ class BatchEncoder
                 echo "    Chroma: {$probeData['chroma_location']}\n";
             }
             echo "    Audio: {$probeData['audio_codec']} ({$probeData['audio_channels']}ch)\n";
-            
+
             // --- Report Audio Track Selection ---
             $keepTracks = [];
             if (!empty($this->audioLangs)) {
@@ -670,16 +686,18 @@ class BatchEncoder
                     }
                 }
                 if (empty($keepTracks)) {
-                     echo "    Warning: No audio matched '" . implode(',',$this->audioLangs) . "'. Keeping ALL.\n";
-                     $keepTracks = $probeData['audio_tracks'];
+                    echo "    Warning: No audio matched '" . implode(',', $this->audioLangs) . "'. Keeping ALL.\n";
+                    $keepTracks = $probeData['audio_tracks'];
                 } else {
-                     echo "    Audio Selection: Keeping " . count($keepTracks) . " tracks matching '" . implode(',',$this->audioLangs) . "'.\n";
+                    echo "    Audio Selection: Keeping " . count($keepTracks) . " tracks matching '" . implode(',', $this->audioLangs) . "'.\n";
                 }
             } else {
                 // Default: Keep ALL tracks (New Behavior for Multi-Track support)
                 $keepTracks = $probeData['audio_tracks'];
                 // Only log if interesting
-                if (count($keepTracks) > 1) echo "    Audio Selection: Keeping ALL " . count($keepTracks) . " tracks.\n";
+                if (count($keepTracks) > 1) {
+                    echo "    Audio Selection: Keeping ALL " . count($keepTracks) . " tracks.\n";
+                }
             }
             // ----------------------------------------
 
@@ -721,19 +739,22 @@ class BatchEncoder
                 $isEng = in_array(strtolower($sub['lang']), ['eng', 'en', 'en-us']);
                 // Filter: Not Hearing Impaired (SDH)
                 $isSDH = ($sub['sdh'] == 1) || (stripos($sub['title'], 'sdh') !== false);
-                
+
                 if ($isEng && !$isSDH) {
                     $suffix = "_" . $sub['lang'];
-                    if ($sub['forced']) $suffix .= "_forced";
+                    if ($sub['forced']) {
+                        $suffix .= "_forced";
+                    }
 
                     // Append Track Index to ensure Uniqueness (e.g. _eng_3.mkv)
                     $suffix .= "_" . $sub['index'];
 
                     // Extract to temp MKV (Safest for PGS/ASS/SRT)
                     $subOut = $this->wrkPath . $this->swapExt($fileName, 'mkv', $suffix);
-                    
+
                     // Added -map_chapters -1 to prevent chapters in sub file
-                    $subJobs .= sprintf('%s -i "%s" -map 0:%d -c copy -map_chapters -1 "%s"' . "\n",
+                    $subJobs .= sprintf(
+                        '%s -i "%s" -map 0:%d -c copy -map_chapters -1 "%s"' . "\n",
                         $this->toWinPath(Config::get('AUD_ENC')),
                         $this->toWinPath($cleanPath),
                         $sub['index'],
@@ -746,7 +767,7 @@ class BatchEncoder
                     $subClean  .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($subOut));
                     $nextMuxIndex++;
 
-                    echo "  [Subtitle]: Keeping Track {$sub['index']} ({$sub['lang']}" . ($sub['forced']?' Forced':'') . ")\n";
+                    echo "  [Subtitle]: Keeping Track {$sub['index']} ({$sub['lang']}" . ($sub['forced'] ? ' Forced' : '') . ")\n";
                 }
             }
 
@@ -775,12 +796,13 @@ class BatchEncoder
 
                 // 1. Fetch exact codec and channels for THIS specific track
                 // FIX: Removed "0:" from the stream specifier
-                $probeCmd = sprintf('%s -v error -select_streams %d -show_entries stream=codec_name,channels -of csv=p=0 "%s"', 
-                    $this->toWinPath(Config::get('FFPROBE')), 
-                    $track['index'], 
+                $probeCmd = sprintf(
+                    '%s -v error -select_streams %d -show_entries stream=codec_name,channels -of csv=p=0 "%s"',
+                    $this->toWinPath(Config::get('FFPROBE')),
+                    $track['index'],
                     $this->toWinPath($cleanPath)
                 );
-                
+
                 $probeOutput = [];
                 exec($probeCmd, $probeOutput);
 
@@ -821,25 +843,20 @@ class BatchEncoder
                         // Default usually encodes, but if source is Opus, we prefer Copy
                         $activeProfile = 'copy';
                         echo "    [Smart Audio]: Source is Opus (Default Profile). Switched to Copy.\n";
-                    }
-                    elseif (($activeProfile === 'opus-5.1' || $activeProfile === 'opus-8-6') && $trackCh === 6) {
+                    } elseif (($activeProfile === 'opus-5.1' || $activeProfile === 'opus-8-6') && $trackCh === 6) {
                         $activeProfile = 'copy';
                         echo "    [Smart Audio]: Source is Opus 5.1. Switched to Copy.\n";
-                    }
-                    elseif ($activeProfile === 'opus-stereo' && $trackCh === 2) {
+                    } elseif ($activeProfile === 'opus-stereo' && $trackCh === 2) {
                         $activeProfile = 'copy';
                         echo "    [Smart Audio]: Source is Opus Stereo. Switched to Copy.\n";
-                    }
-                    elseif ($activeProfile === 'opus-pans' && $trackCh === 2) {
+                    } elseif ($activeProfile === 'opus-pans' && $trackCh === 2) {
                         // Pans profile is usually for downmixing. If source is already stereo, we copy.
                         $activeProfile = 'copy';
                         echo "    [Smart Audio]: Source is Opus Stereo (Pans Profile). Switched to Copy.\n";
                     }
-                } 
-                elseif ($activeProfile === 'aac-opus' && $trackCodec === 'aac') {
+                } elseif ($activeProfile === 'aac-opus' && $trackCodec === 'aac') {
                     echo "    [Smart Audio]: Source is AAC. Forced converting to Opus.\n";
-                }
-                elseif ($trackCodec === 'aac') {
+                } elseif ($trackCodec === 'aac') {
                     // Rule: Copy AAC unless downmixing (5.1->Stereo OR 7.1->5.1)
                     $isDownmix = (($trackCh > 2) && ($activeProfile === 'opus-stereo' || $activeProfile === 'opus-pans'))
                               || (($trackCh > 6) && ($activeProfile === 'opus-8-6'));
@@ -848,8 +865,7 @@ class BatchEncoder
                         $activeProfile = 'copy';
                         echo "    [Smart Audio]: Source is AAC (No Downmix). Switched to Copy.\n";
                     }
-                }
-                elseif ($activeProfile === 'opus-8-6' && $trackCh > 6) {
+                } elseif ($activeProfile === 'opus-8-6' && $trackCh > 6) {
                     echo "    [Smart Audio]: Source is $trackCodec ($trackCh channels). Will downmix to 5.1 Opus.\n";
                 }
 
@@ -866,13 +882,13 @@ class BatchEncoder
                     } else {
                         $trackOpts = $this->finalAudOptions;
                     }
-                    
+
                     // Extract bitrate for display purposes
                     $bitrateDisplay = "";
                     if (preg_match('/-b:a\s+([0-9]+[kKmM]?)/i', $trackOpts, $matches)) {
                         $bitrateDisplay = " @" . strtoupper($matches[1]) . "bps";
                     }
-                    
+
                     echo "      Trk {$track['index']} ($trackCodec {$trackCh}ch) -> Encode ($activeProfile{$bitrateDisplay})\n";
                 }
 
@@ -883,7 +899,7 @@ class BatchEncoder
                     ["-c:a:$outAudIndex ", "-b:a:$outAudIndex ", "-ac:a:$outAudIndex ", "-filter:a:$outAudIndex "],
                     $trackOpts . ' '
                 );
-                
+
                 $finalAudOptsStr .= " " . trim($trackOpts);
 
                 // 5. Flags / Disposition
@@ -896,7 +912,7 @@ class BatchEncoder
                 } elseif ($track['default']) {
                     $isDef = 1;
                 }
-                
+
                 $audDispStr .= " -disposition:a:$outAudIndex " . ($isDef ? 'default' : '0');
                 $outAudIndex++;
             }
@@ -940,7 +956,7 @@ class BatchEncoder
             }
 
             // BUILD JOBS
-            
+
             $outVid = $this->wrkPath . $this->swapExt($fileName, 'h265');
             $outAud = $this->wrkPath . $this->swapExt($fileName, $audioExt);
             $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
@@ -955,20 +971,22 @@ class BatchEncoder
 
             if (!$isVideoCopy) {
                 // Video Encode Job
-                $videoJob = sprintf('%s %s -i "%s" -o "%s"' . "\n", 
-                    $this->toWinPath(Config::get('VID_ENC')), 
-                    $currentVidOptions, 
-                    $this->toWinPath($cleanPath), 
+                $videoJob = sprintf(
+                    '%s %s -i "%s" -o "%s"' . "\n",
+                    $this->toWinPath(Config::get('VID_ENC')),
+                    $currentVidOptions,
+                    $this->toWinPath($cleanPath),
                     $this->toWinPath($outVid)
                 );
 
                 // Pre-Mux Job
-                $preMxJob = sprintf('%s -o "%s" "%s"' . "\n", 
+                $preMxJob = sprintf(
+                    '%s -o "%s" "%s"' . "\n",
                     $this->toWinPath(Config::get('MKV_MRG')),
-                    $this->toWinPath($preMux), 
+                    $this->toWinPath($preMux),
                     $this->toWinPath($outVid)
                 );
-                
+
                 // Cleanup items for Encode mode
                 $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outVid));
                 $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($preMux));
@@ -985,11 +1003,12 @@ class BatchEncoder
             }
 
             // Audio Job (Updated with multi-track Maps)
-            $audioJob = sprintf('%s -i "%s" %s %s %s %s "%s"' . "\n", 
-                $this->toWinPath(Config::get('AUD_ENC')), 
-                $this->toWinPath($cleanPath), 
+            $audioJob = sprintf(
+                '%s -i "%s" %s %s %s %s "%s"' . "\n",
+                $this->toWinPath(Config::get('AUD_ENC')),
+                $this->toWinPath($cleanPath),
                 $audMapStr,    // Map specific tracks
-                $finalAudOptsStr, // Injects dynamic mapped options (-c:a:0... -filter:a:1...) 
+                $finalAudOptsStr, // Injects dynamic mapped options (-c:a:0... -filter:a:1...)
                 $audDispStr,   // Set flags
                 $metaArgs,
                 $this->toWinPath($outAud)
@@ -1004,7 +1023,7 @@ class BatchEncoder
             if ($isVideoCopy) {
                 // Input 0: Source File (Map Source Video Track 0)
                 $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
-                $muxMaps   .= " -map 0:v:0"; 
+                $muxMaps   .= " -map 0:v:0";
             } else {
                 // Input 0: Encoded Video (Map PreMux Video Track 0)
                 $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($preMux));
@@ -1037,7 +1056,8 @@ class BatchEncoder
             }
 
             // Generate Final Command
-            $muxerJob = sprintf('%s %s %s %s %s -c copy "%s"' . "\n",
+            $muxerJob = sprintf(
+                '%s %s %s %s %s -c copy "%s"' . "\n",
                 $muxCmd,
                 $muxInputs,
                 $muxMaps,
@@ -1075,12 +1095,14 @@ class BatchEncoder
 
         echo "\nDone. Created:\n";
         foreach ([$videoBat, $audioBat, $subBat, $mergeBat, $cleanBat] as $bat) {
-            if (file_exists($bat)) echo "- $bat\n";
+            if (file_exists($bat)) {
+                echo "- $bat\n";
+            }
         }
         echo "\n";
     }
 
-    private function swapExt($filename, $newExt, $suffix='') {
+    private function swapExt($filename, $newExt, $suffix = '') {
         $info = pathinfo($filename);
         return $info['filename'] . $suffix . '.' . $newExt;
     }

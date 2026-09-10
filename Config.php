@@ -49,17 +49,19 @@ class Config
             $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
             foreach ($lines as $line) {
                 // Ignore comments
-                if (str_starts_with(trim($line), '#')) continue;
+                if (str_starts_with(trim($line), '#')) {
+                    continue;
+                }
 
                 // Parse Key: Value
                 if (str_contains($line, ':')) {
                     list($k, $v) = explode(':', $line, 2);
                     $key = trim($k);
                     $val = trim($v);
-                    
+
                     // Remove wrapping quotes if present
                     $val = trim($val, " \"'");
-                    
+
                     // Update setting
                     if (array_key_exists($key, self::$data)) {
                         self::$data[$key] = $val;
