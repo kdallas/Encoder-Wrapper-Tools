@@ -8,11 +8,12 @@ class ScanDir
     private static $recursive;
 
     // scan(dirpath::string|array, extensions::string|array, recursive::true|false)
-    public static function scan() {
+    public static function scan()
+    {
         // Initialize defaults
         self::$recursive = false;
-        self::$directories = array();
-        self::$files = array();
+        self::$directories = [];
+        self::$files = [];
         self::$ext_filter = false;
 
         // Check we have minimum parameters
@@ -42,10 +43,11 @@ class ScanDir
         return self::$files;
     }
 
-    private static function verifyPaths($paths) {
-        $path_errors = array();
+    private static function verifyPaths($paths)
+    {
+        $path_errors = [];
         if (gettype($paths) == "string") {
-            $paths = array($paths);
+            $paths = [$paths];
         }
 
         foreach ($paths as $path) {
@@ -64,21 +66,22 @@ class ScanDir
     }
 
     // This is how we scan directories
-    private static function find_contents($dir) {
-        $result = array();
+    private static function find_contents($dir)
+    {
+        $result = [];
         $root = scandir($dir);
         foreach ($root as $value) {
             if ($value === '.' || $value === '..') {
                 continue;
             }
-            if (is_file($dir.DIRECTORY_SEPARATOR.$value)) {
-                if (!self::$ext_filter || in_array(strtolower(pathinfo($dir.DIRECTORY_SEPARATOR.$value, PATHINFO_EXTENSION)), self::$ext_filter)) {
-                    self::$files[] = $result[] = $dir.DIRECTORY_SEPARATOR.$value;
+            if (is_file($dir . DIRECTORY_SEPARATOR . $value)) {
+                if (!self::$ext_filter || in_array(strtolower(pathinfo($dir . DIRECTORY_SEPARATOR . $value, PATHINFO_EXTENSION)), self::$ext_filter)) {
+                    self::$files[] = $result[] = $dir . DIRECTORY_SEPARATOR . $value;
                 }
                 continue;
             }
             if (self::$recursive) {
-                foreach (self::find_contents($dir.DIRECTORY_SEPARATOR.$value) as $value) {
+                foreach (self::find_contents($dir . DIRECTORY_SEPARATOR . $value) as $value) {
                     self::$files[] = $result[] = $value;
                 }
             }

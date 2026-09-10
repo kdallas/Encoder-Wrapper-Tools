@@ -57,7 +57,8 @@ class BatchEncoder
         '--skip-size'    => '--skip-size=500MB',
     ];
 
-    public function __construct($argv) {
+    public function __construct($argv)
+    {
         try {
             // Initialize Defaults (Sanitized immediately)
             $this->wrkPath = $this->sanitizePath(Config::get('DEFAULT_WRK_PATH'), true);
@@ -86,7 +87,8 @@ class BatchEncoder
         }
     }
 
-    public function run() {
+    public function run()
+    {
         try {
             // Group files by normalized filename (e.g. "S01E01" -> [Path1, Path2])
             $fileSets = $this->scanAndGroupTargets();
@@ -122,7 +124,8 @@ class BatchEncoder
      * Converts everything to Forward Slashes (/) for internal consistency
      * and Git Bash compatibility.
      */
-    private function sanitizePath($path, $isDir = false) {
+    private function sanitizePath($path, $isDir = false)
+    {
         // Unify Slashes to /
         $clean = str_replace('\\', '/', $path);
 
@@ -168,11 +171,13 @@ class BatchEncoder
      * Converts internal forward slashes to Windows backslashes
      * Used for: .ps1 generation, UNC file checks, and FFmpeg commands.
      */
-    private function toWinPath($path) {
+    private function toWinPath($path)
+    {
         return str_replace('/', '\\', $path);
     }
 
-    private function parseArguments($argv) {
+    private function parseArguments($argv)
+    {
         // Env Var Check (Legacy support for single path)
         $envPath = getenv('BATCH_PATH');
         if ($envPath !== false && !empty($envPath)) {
@@ -259,19 +264,21 @@ class BatchEncoder
      * HELPER: Parses a human-readable size (e.g. "500MB", "1.5GB") into bytes.
      * Note: MB/GB are treated as binary units (MiB = 1024^2, GiB = 1024^3).
      */
-    private function parseSizeArg($raw) {
+    private function parseSizeArg($raw)
+    {
         if (!preg_match('/^(\d+(?:\.\d+)?)\s*(mb|gb)$/i', $raw, $m)) {
             throw new Exception("Invalid --skip-size value '{$raw}'. Expected format: e.g. --skip-size=500MB or --skip-size=1GB");
         }
-        $bytes = (float)$m[1] * (strtolower($m[2]) === 'gb' ? 1024 ** 3 : 1024 ** 2);
-        return (int)round($bytes);
+        $bytes = (float) $m[1] * (strtolower($m[2]) === 'gb' ? 1024 ** 3 : 1024 ** 2);
+        return (int) round($bytes);
     }
 
     /**
      * HELPER: Formats a byte count as a human-readable MB/GB string.
      * Never emits KB, since --skip-size only accepts MB/GB values.
      */
-    private function humanSize($bytes) {
+    private function humanSize($bytes)
+    {
         if ($bytes >= 1024 ** 3) {
             return round($bytes / 1024 ** 3, 2) . ' GB';
         }
@@ -282,7 +289,8 @@ class BatchEncoder
      * HELPER: Robust file size check (tries Unix-style path first, then Windows-style).
      * Returns bytes, or false when the size cannot be determined (caller skips the filter).
      */
-    private function getFileSize($path) {
+    private function getFileSize($path)
+    {
         foreach ([$path, $this->toWinPath($path)] as $candidate) {
             if (!file_exists($candidate)) {
                 continue;
@@ -305,7 +313,8 @@ class BatchEncoder
         return false;
     }
 
-    private function validateInputs() {
+    private function validateInputs()
+    {
         if (empty($this->pathInputs)) {
             throw new Exception("Missing --path value(s)");
         }
@@ -337,7 +346,8 @@ class BatchEncoder
         }
     }
 
-    private function resolveProfiles() {
+    private function resolveProfiles()
+    {
         $vidProfiles = Profiles::getVideo();
         $audProfiles = Profiles::getAudio();
 
@@ -406,7 +416,8 @@ class BatchEncoder
      * Scan all path inputs and group them by filename (without extension).
      * Returns: ['MyVideo' => ['Path/To/Source1/MyVideo.mkv', 'Path/To/Source2/MyVideo.mp4']]
      */
-    private function scanAndGroupTargets() {
+    private function scanAndGroupTargets()
+    {
         $fileSets = [];
         $srcExts = ['mkv','mp4'];
 
@@ -430,7 +441,7 @@ class BatchEncoder
                 $found = ScanDir::scan($scanPath, $srcExts, $this->recursive);
 
                 // ScanDir might return mixed slashes depending on OS; unify them here for safety.
-                $foundFiles = array_map(fn ($p) => $this->sanitizePath($p, false), $found);
+                $foundFiles = array_map(fn($p) => $this->sanitizePath($p, false), $found);
             } else {
                 echo "Warning: Path not found: $inputPath\n";
                 continue;
@@ -483,7 +494,8 @@ class BatchEncoder
      * Helper to ensure filenames match even with punctuation differences
      * e.g. "Title; Subtitle" == "Title Subtitle"
      */
-    private function normalizeFilename($name) {
+    private function normalizeFilename($name)
+    {
         $n = strtolower($name);
         // Replace common punctuation with space
         $n = str_replace([';', ',', '_', '-', '.', '[', ']', '(', ')'], ' ', $n);
@@ -495,7 +507,8 @@ class BatchEncoder
     /**
      * Generates jobs based on Custom Mux Parameters
      */
-    private function generateCustomMuxFiles($fileSets) {
+    private function generateCustomMuxFiles($fileSets)
+    {
         // Read Params
         $rawParams = file_get_contents($this->customMuxFile);
         // Collapse newlines into spaces
@@ -534,7 +547,7 @@ class BatchEncoder
                 $encCmd,
                 $inputArgs,
                 $cleanParams,
-                $this->toWinPath($finalMkv)
+                $this->toWinPath($finalMkv),
             );
 
             echo "Queuing Custom Mux: $originalName (" . count($sources) . " sources)\n";
@@ -547,7 +560,8 @@ class BatchEncoder
     /**
      * CUSTOM PROPS: Copy + MkvPropEdit
      */
-    private function generateCustomPropsFiles($files) {
+    private function generateCustomPropsFiles($files)
+    {
         // Read Params (strip newlines)
         $rawParams = file_get_contents($this->customPropsFile);
         $cleanParams = trim(preg_replace('/\s+/', ' ', $rawParams));
@@ -571,7 +585,7 @@ class BatchEncoder
             $copyCmd = sprintf(
                 'Copy-Item "%s" "%s"',
                 $this->toWinPath($sourcePath),
-                $this->toWinPath($finalMkv)
+                $this->toWinPath($finalMkv),
             );
 
             // 2. Run PropEdit on Output
@@ -579,7 +593,7 @@ class BatchEncoder
                 '%s "%s" %s',
                 $toolCmd,
                 $this->toWinPath($finalMkv),
-                $cleanParams
+                $cleanParams,
             );
 
             echo "Queuing Custom Props: $fileName\n";
@@ -591,7 +605,8 @@ class BatchEncoder
         echo "\nDone. Created: $propBat\n";
     }
 
-    private function generateBatchFiles($files) {
+    private function generateBatchFiles($files)
+    {
         // Ensure Batch Script Directory Exists
         if (!is_dir($this->jobPath)) {
             if (!mkdir($this->jobPath, 0777, true)) {
@@ -758,7 +773,7 @@ class BatchEncoder
                         $this->toWinPath(Config::get('AUD_ENC')),
                         $this->toWinPath($cleanPath),
                         $sub['index'],
-                        $this->toWinPath($subOut)
+                        $this->toWinPath($subOut),
                     );
 
                     // Add to Muxer
@@ -800,7 +815,7 @@ class BatchEncoder
                     '%s -v error -select_streams %d -show_entries stream=codec_name,channels -of csv=p=0 "%s"',
                     $this->toWinPath(Config::get('FFPROBE')),
                     $track['index'],
-                    $this->toWinPath($cleanPath)
+                    $this->toWinPath($cleanPath),
                 );
 
                 $probeOutput = [];
@@ -897,7 +912,7 @@ class BatchEncoder
                 $trackOpts = str_replace(
                     ['-c:a ', '-b:a ', '-ac ', '-af '],
                     ["-c:a:$outAudIndex ", "-b:a:$outAudIndex ", "-ac:a:$outAudIndex ", "-filter:a:$outAudIndex "],
-                    $trackOpts . ' '
+                    $trackOpts . ' ',
                 );
 
                 $finalAudOptsStr .= " " . trim($trackOpts);
@@ -976,7 +991,7 @@ class BatchEncoder
                     $this->toWinPath(Config::get('VID_ENC')),
                     $currentVidOptions,
                     $this->toWinPath($cleanPath),
-                    $this->toWinPath($outVid)
+                    $this->toWinPath($outVid),
                 );
 
                 // Pre-Mux Job
@@ -984,7 +999,7 @@ class BatchEncoder
                     '%s -o "%s" "%s"' . "\n",
                     $this->toWinPath(Config::get('MKV_MRG')),
                     $this->toWinPath($preMux),
-                    $this->toWinPath($outVid)
+                    $this->toWinPath($outVid),
                 );
 
                 // Cleanup items for Encode mode
@@ -1011,7 +1026,7 @@ class BatchEncoder
                 $finalAudOptsStr, // Injects dynamic mapped options (-c:a:0... -filter:a:1...)
                 $audDispStr,   // Set flags
                 $metaArgs,
-                $this->toWinPath($outAud)
+                $this->toWinPath($outAud),
             );
 
             // Mux Job
@@ -1063,7 +1078,7 @@ class BatchEncoder
                 $muxMaps,
                 $metaArgs,
                 $videoMeta,
-                $this->toWinPath($finMkv)
+                $this->toWinPath($finMkv),
             );
 
             // Remaining Cleanup
@@ -1102,7 +1117,8 @@ class BatchEncoder
         echo "\n";
     }
 
-    private function swapExt($filename, $newExt, $suffix = '') {
+    private function swapExt($filename, $newExt, $suffix = '')
+    {
         $info = pathinfo($filename);
         return $info['filename'] . $suffix . '.' . $newExt;
     }

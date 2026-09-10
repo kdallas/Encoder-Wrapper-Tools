@@ -10,7 +10,8 @@ class Probe
     //    'subtitles' => [],
     //    'chapters' => bool
     // ]
-    public static function analyze($filePath) {
+    public static function analyze($filePath)
+    {
         $ffprobe = Config::get('FFPROBE');
 
         if (!file_exists($ffprobe)) {
@@ -23,7 +24,7 @@ class Probe
         $cmd1 = sprintf(
             '"%s" -hide_banner -loglevel warning -print_format json -show_chapters -show_streams -i "%s" 2>&1',
             $ffprobe,
-            $filePath
+            $filePath,
         );
         $data1 = self::getJsonOutput($cmd1);
 
@@ -32,7 +33,7 @@ class Probe
         $cmd2 = sprintf(
             '"%s" -hide_banner -loglevel warning -print_format json -show_frames -read_intervals "%%+#50" -show_entries "frame=side_data_list" -i "%s" 2>&1',
             $ffprobe,
-            $filePath
+            $filePath,
         );
         $data2 = self::getJsonOutput($cmd2);
 
@@ -113,7 +114,7 @@ class Probe
                             'lang'     => $lang,
                             'title'    => $title,
                             'default'  => $isDefault,
-                            'forced'   => $isForced
+                            'forced'   => $isForced,
                         ];
                     }
 
@@ -136,7 +137,7 @@ class Probe
                             'lang'   => $lang,
                             'title'  => $title,
                             'forced' => $forced,
-                            'sdh'    => $sdh
+                            'sdh'    => $sdh,
                         ];
                     }
                 }
@@ -202,7 +203,8 @@ class Probe
         ];
     }
 
-    private static function getJsonOutput($cmd) {
+    private static function getJsonOutput($cmd)
+    {
         $rawOutput = shell_exec($cmd);
         $first = strpos($rawOutput, '{');
         $last  = strrpos($rawOutput, '}');
@@ -213,8 +215,9 @@ class Probe
         return json_decode($json);
     }
 
-    private static function formatMasteringString($sd) {
-        $get = fn ($val) => explode('/', $val ?? '0')[0];
+    private static function formatMasteringString($sd)
+    {
+        $get = fn($val) => explode('/', $val ?? '0')[0];
         $gx = $get($sd->green_x ?? null);
         $gy = $get($sd->green_y ?? null);
         $bx = $get($sd->blue_x ?? null);

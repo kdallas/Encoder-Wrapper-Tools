@@ -19,14 +19,16 @@ class Config
         'DEFAULT_JOB_PATH' => './output/',
     ];
 
-    public static function get($key) {
+    public static function get($key)
+    {
         if (!self::$isLoaded) {
             self::load();
         }
         return self::$data[$key] ?? null;
     }
 
-    private static function load() {
+    private static function load()
+    {
         // Start with defaults
         self::$data = self::$defaults;
 

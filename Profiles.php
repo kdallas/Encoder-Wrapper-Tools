@@ -7,7 +7,8 @@ class Profiles
      * Filters out known handled keys and audio keys to prevent passing FFmpeg
      * variables to the video encoder.
      */
-    private static function formatVideoExtraArgs($args, $handledKeys = []) {
+    private static function formatVideoExtraArgs($args, $handledKeys = [])
+    {
         $audioKeys = ['abitrate', 'bitaud'];
         $exclude = array_merge($handledKeys, $audioKeys);
 
@@ -32,7 +33,8 @@ class Profiles
         return $extraStr;
     }
 
-    public static function getVideo() {
+    public static function getVideo()
+    {
         return [
             '2pass' => function ($args) {
                 $bitrate = $args['bitrate'] ?? $args['bitvid'] ?? '1200';
@@ -55,11 +57,12 @@ class Profiles
                 return $base . self::formatVideoExtraArgs($args, ['bitrate', 'bitvid']);
             },
             'copy'    => 'copy',
-            'default' => "--vbr 1200 --multipass 2pass-full --codec h265 --preset quality --level auto --output-depth 10"
+            'default' => "--vbr 1200 --multipass 2pass-full --codec h265 --preset quality --level auto --output-depth 10",
         ];
     }
 
-    public static function getAudio() {
+    public static function getAudio()
+    {
         return [
             'opus-8-6' => function ($args) {
                 // Check for 5.1 override, then global, then default

@@ -8,13 +8,12 @@ $finder = (new PhpCsFixer\Finder())
 
 return (new PhpCsFixer\Config())
     ->setRules([
-        '@PSR12' => true,
-        // House style: function declarations open their brace on the same line (K&R).
-        // Class and control-structure braces already match PSR-12, so they stay at the
-        // defaults — do not widen this override to those, it would move them the wrong way.
-        'braces_position' => [
-            'functions_opening_brace' => 'same_line',
-        ],
+        // PER Coding Style 3.0, the successor to the now-deprecated PSR-12.
+        // Pinned to the "x0" spelling: the dotted form (@PER-CS3.0) is deprecated
+        // and is scheduled for removal in PHP-CS-Fixer 4.0. The bare @PER-CS alias
+        // tracks the newest revision, so it would silently move us when 3.1 lands —
+        // pin until 3.1 support is intentional.
+        '@PER-CS3x0' => true,
     ])
     ->setFinder($finder)
     ->setRiskyAllowed(false)
