@@ -96,6 +96,9 @@ Run the application from the terminal using the following syntax:
 | `--path` | **Required.** The source path. Can be used multiple times for multi-source merging. |
 | `--prefix` | **Required.** A unique name for the job batch (names the output `.ps1` files). |
 | `--recursive` | Enables recursive scanning of subdirectories. |
+| `--skip-size` | Skips source files smaller than the given size, excluding them from all generated `.ps1` outputs (Format: `500MB` or `1.5GB`; decimal values allowed). MB/GB are treated as binary units (MiB/GiB). |
+| `--vid-only` | Companion to `--skip-size`. Size-matched files are rescued instead of dropped: the video encode is skipped and the final mux takes video from the original source (audio/subs/chapters still processed). Requires `--skip-size`; mutually exclusive with `--aud-only`. |
+| `--aud-only` | Companion to `--skip-size`. Size-matched files are rescued instead of dropped: the audio encode is skipped and the final mux takes the selected audio tracks from the original source (video/subs/chapters still processed). Requires `--skip-size`; mutually exclusive with `--vid-only`. |
 | `--custom-mux` | Path to a text file containing raw `ffmpeg` args for custom remuxing jobs. |
 | `--custom-props` | Path to a text file containing `mkvpropedit` args for metadata updates. |
 | `--title` | Sets the global Title metadata. Use `--title=""` to strip the title entirely. |
@@ -236,6 +239,18 @@ This mode allows you to modify file headers (Default flags, Track Names) in-plac
 ```sh
 ./run.php --path="X:/Video/" --path="G:/Audio/" --prefix="MergeBatch" --custom-mux="mux.txt"
 ```
+
+**Ignore Samples/Trailers (Skip Undersized Files in a Downloads Folder):**
+```sh
+./run.php --path="D:\Downloads\MyShow.S02" --prefix=MyShow --video=2pass --bitrate=2500 --skip-size=100MB
+```
+*Result: Any source file under 100 MB (e.g., samples, trailers, or other junk from torrent packs) is logged and skipped during the scan, producing no `.ps1` outputs; everything else is encoded as usual.*
+
+**Rescue Undersized Files Without Re-Encoding the Video:**
+```sh
+./run.php --path="D:\Downloads\MyShow.S02" --prefix=MyShow --video=2pass --bitrate=2500 --skip-size=990MB --vid-only
+```
+*Result: Files under 990 MB are rescued instead of dropped — they skip the NVEnc video encode and the final mux takes the video (and chapters) straight from the source, while audio/subs are still processed into their `.ps1` outputs. All other files in the same run get the full encode. Swap `--vid-only` for `--aud-only` to keep the original audio instead.*
 
 <br>
 

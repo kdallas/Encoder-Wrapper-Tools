@@ -9,6 +9,10 @@ class BatchEncoder
     private $customPropsFile = "";
     private $titleInput = null;
     private $recursive = false;
+    private $skipSizeBytes = 0;      // Files smaller than this are skipped (0 = disabled)
+    private $vidOnly = false;        // --vid-only: rescue skip-size matches, skip VIDEO encode (mux source video)
+    private $audOnly = false;        // --aud-only: rescue skip-size matches, skip AUDIO encode (mux source audio)
+    private $skipMatchedPaths = [];  // Full paths of files rescued by the --skip-size filter (partial-encode set)
 
     // Track Selection Inputs
     private $audioLangs = [];  // e.g. ['eng', 'jpn']
@@ -214,6 +218,15 @@ class BatchEncoder
                 // " --title=" results in empty string, effectively removing it
                 $this->titleInput = substr($arg, 8); 
             }
+            elseif (str_starts_with($arg, '--skip-size=')) {
+                $this->skipSizeBytes = $this->parseSizeArg(substr($arg, 12));
+            }
+            elseif ($arg === '--vid-only') {
+                $this->vidOnly = true;
+            }
+            elseif ($arg === '--aud-only') {
+                $this->audOnly = true;
+            }
             elseif ($arg === '--recursive') {
                 $this->recursive = true;
             }
@@ -221,14 +234,53 @@ class BatchEncoder
                 // Dynamic args (e.g. --q=20)
                 $cleanArg = substr($arg, 2); 
                 $parts = explode('=', $cleanArg, 2);
-                $this->extraArgs[$parts[0]] = $parts[1] ?? true; 
+                $this->extraArgs[$parts[0]] = $parts[1] ?? true;
             }
         }
+    }
+
+    /**
+     * HELPER: Parses a human-readable size (e.g. "500MB", "1.5GB") into bytes.
+     * Note: MB/GB are treated as binary units (MiB = 1024^2, GiB = 1024^3).
+     */
+    private function parseSizeArg($raw) {
+        if (!preg_match('/^(\d+(?:\.\d+)?)\s*(mb|gb)$/i', $raw, $m)) {
+            throw new Exception("Invalid --skip-size value '{$raw}'. Expected format: e.g. --skip-size=500MB or --skip-size=1GB");
+        }
+        $bytes = (float)$m[1] * (strtolower($m[2]) === 'gb' ? 1024 ** 3 : 1024 ** 2);
+        return (int)round($bytes);
+    }
+
+    /**
+     * HELPER: Formats a byte count as a human-readable MB/GB string.
+     */
+    private function humanSize($bytes) {
+        if ($bytes >= 1024 ** 3) return round($bytes / 1024 ** 3, 2) . ' GB';
+        if ($bytes >= 1024 ** 2) return round($bytes / 1024 ** 2, 2) . ' MB';
+        return round($bytes / 1024, 2) . ' KB';
+    }
+
+    /**
+     * HELPER: Robust file size check (tries Unix-style path first, then Windows-style).
+     */
+    private function getFileSize($path) {
+        $size = @filesize($path);
+        if ($size === false) {
+            $size = @filesize($this->toWinPath($path));
+        }
+        return $size;
     }
 
     private function validateInputs() {
         if (empty($this->pathInputs)) { throw new Exception("Missing --path value(s)"); }
         if (empty($this->prefixInput)) { throw new Exception("Missing --prefix value"); }
+
+        if ($this->vidOnly && $this->audOnly) {
+            throw new Exception("--vid-only and --aud-only are mutually exclusive. Use --video=copy --audio=copy for a full passthrough remux.");
+        }
+        if (($this->vidOnly || $this->audOnly) && $this->skipSizeBytes <= 0) {
+            throw new Exception("--vid-only/--aud-only are companions to --skip-size and require it to be set.");
+        }
 
         if (!empty($this->customMuxFile)) {
              if (!file_exists($this->customMuxFile) && !file_exists($this->toWinPath($this->customMuxFile))) {
@@ -343,6 +395,26 @@ class BatchEncoder
 
             // Grouping Logic
             foreach ($foundFiles as $file) {
+                // Skip-Size Filter: exclude files smaller than the user-defined limit
+                if ($this->skipSizeBytes > 0) {
+                    $size = $this->getFileSize($file);
+                    if ($size !== false && $size < $this->skipSizeBytes) {
+                        // Companion flags rescue the file: scripts are still generated,
+                        // but one stream is passed through from the source instead of encoded.
+                        if ($this->vidOnly || $this->audOnly) {
+                            $this->skipMatchedPaths[$file] = true;
+                            $mode = $this->vidOnly
+                                ? 'rescued (vid-only: video encode skipped, final mux keeps source video)'
+                                : 'rescued (aud-only: audio encode skipped, final mux keeps source audio)';
+                            echo "  [Skip-Size]: " . basename($file) . " (" . $this->humanSize($size)
+                                . " < " . $this->humanSize($this->skipSizeBytes) . ") - $mode\n";
+                        } else {
+                            echo "  [Skip-Size]: " . basename($file) . " (" . $this->humanSize($size)
+                                . " < " . $this->humanSize($this->skipSizeBytes) . ") - skipped\n";
+                            continue;
+                        }
+                    }
+                }
                 $info = pathinfo($file);
                 $baseName = $info['filename']; 
                 // Determine Key (Base Name)
@@ -496,6 +568,14 @@ class BatchEncoder
             // $cleanPath is guaranteed to be C:/Path/to/file.mkv
             $fileName = basename($cleanPath);
 
+            // Partial-encode treatment: ONLY files rescued by the --skip-size filter
+            $isVidPassthrough = isset($this->skipMatchedPaths[$cleanPath]) && $this->vidOnly;
+            $isAudPassthrough = isset($this->skipMatchedPaths[$cleanPath]) && $this->audOnly;
+            if ($isVidPassthrough) echo "  [Skip-Size]: Video encode SKIPPED (vid-only). Mux will take video from source.\n";
+            if ($isAudPassthrough) echo "  [Skip-Size]: Audio encode SKIPPED (aud-only). Mux will take audio from source.\n";
+            // Per-file video copy: global --video=copy OR vid-only rescue (reuses copy machinery)
+            $isVideoCopy = ($this->videoProfileKey === 'copy') || $isVidPassthrough;
+
             // Probe Logic
             // FIX: Pass Windows Path to Probe for UNC compatibility
             $probeData = Probe::analyze($this->toWinPath($cleanPath));
@@ -562,18 +642,27 @@ class BatchEncoder
             $subClean  = "";
 
             // Input Index Tracker for Muxer
-            // 0=Video (PreMux or Source), 1=Audio (OutAud)
-            $nextMuxIndex = 2; 
+            // 0=Video (PreMux or Source), 1=Audio (OutAud, or Source when aud-only)
+            $nextMuxIndex = 2;
+            $srcIsMuxInput = $isAudPassthrough; // Source is added as mux input 1 for audio passthrough
 
             // Chapter Logic (Map from Source)
             $chapterMapArgs = "";
             if ($probeData['has_chapters']) {
-                // Add Source File as Input to Muxer just for chapters
-                $subInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
+                if ($isVidPassthrough) {
+                    // Source already present as mux input 0 (vid-only passthrough); don't add it twice
+                    $chapterMapArgs = " -map_chapters 0";
+                } elseif ($srcIsMuxInput) {
+                    // Source already present as mux input 1 (aud-only); don't add it twice
+                    $chapterMapArgs = " -map_chapters 1";
+                } else {
+                    // Add Source File as Input to Muxer just for chapters
+                    $subInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
 
-                // Map chapters from this input (Index 2 usually)
-                $chapterMapArgs = " -map_chapters $nextMuxIndex";
-                $nextMuxIndex++; 
+                    // Map chapters from this input (Index 2 usually)
+                    $chapterMapArgs = " -map_chapters $nextMuxIndex";
+                    $nextMuxIndex++;
+                }
                 echo "  [Chapter]: Mapping directly from Source.\n";
             }
 
@@ -621,6 +710,7 @@ class BatchEncoder
 
             // --- PER-TRACK SMART AUDIO LOGIC & MAPS & FLAGS ---
             $audMapStr = "";
+            $audPassMapStr = ""; // Maps audio directly from the source file (aud-only passthrough)
             $audDispStr = "";
             $finalAudOptsStr = "";
             $outAudIndex = 0;
@@ -629,6 +719,7 @@ class BatchEncoder
 
             foreach ($keepTracks as $track) {
                 $audMapStr .= " -map 0:{$track['index']}";
+                $audPassMapStr .= " -map 1:{$track['index']}";
 
                 // 1. Fetch exact codec and channels for THIS specific track
                 // FIX: Removed "0:" from the stream specifier
@@ -797,15 +888,13 @@ class BatchEncoder
             }
 
             // BUILD JOBS
-            // Check for Video Copy Mode
-            $isVideoCopy = ($this->videoProfileKey === 'copy');
             
             $outVid = $this->wrkPath . $this->swapExt($fileName, 'h265');
             $outAud = $this->wrkPath . $this->swapExt($fileName, $audioExt);
             $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
             $finMkv = $this->wrkPath . $this->swapExt($fileName, 'mkv');
 
-            $currentVidOptions = trim($this->finalVidOptions . " $colorParams $hdrParams $chromaParams $cllParams");
+            $currentVidOptions = trim(preg_replace('/\s+/', ' ', $this->finalVidOptions . " $colorParams $hdrParams $chromaParams $cllParams"));
 
             // Format Commands (Use toWinPath() here for the Batch File content)
 
@@ -832,7 +921,9 @@ class BatchEncoder
                 $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outVid));
                 $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($preMux));
             } else {
-                echo "  [Video]: Copy Mode (Remux). Skipping Encode.\n";
+                echo $isVidPassthrough
+                    ? "  [Video]: Vid-Only Passthrough (skip-size match). Skipping Encode.\n"
+                    : "  [Video]: Copy Mode (Remux). Skipping Encode.\n";
             }
 
             $metaArgs = "";
@@ -869,9 +960,15 @@ class BatchEncoder
             }
 
             // 2. Audio Input
-            // Input 1: Audio File (Map ALL tracks from this new file)
-            $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($outAud));
-            $muxMaps   .= " -map 1:a"; 
+            if ($isAudPassthrough) {
+                // Input 1: Source File (audio taken directly from the original, per keepTracks)
+                $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
+                $muxMaps   .= ($audPassMapStr !== "") ? $audPassMapStr . $audDispStr : " -map 1:a";
+            } else {
+                // Input 1: Audio File (Map ALL tracks from this new file)
+                $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($outAud));
+                $muxMaps   .= " -map 1:a";
+            }
 
             // 3. Subtitles & Chapters Inputs
             // Appended dynamically (e.g. -i source for chapters, -i sub_eng.mkv...)
@@ -898,7 +995,9 @@ class BatchEncoder
             );
 
             // Remaining Cleanup
-            $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outAud));
+            if (!$isAudPassthrough) {
+                $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outAud));
+            }
             $cleanJob .= $subClean;
 
             // Output to Screen
@@ -915,12 +1014,18 @@ class BatchEncoder
             if (strlen($subJobs)) {
                 file_put_contents($subBat, $subJobs, FILE_APPEND);
             }
-            file_put_contents($audioBat, $audioJob, FILE_APPEND);
+            if (!$isAudPassthrough) {
+                file_put_contents($audioBat, $audioJob, FILE_APPEND);
+            }
             file_put_contents($mergeBat, $muxerJob, FILE_APPEND);
             file_put_contents($cleanBat, $cleanJob, FILE_APPEND);
         }
 
-        echo "\nDone. Created:\n- $videoBat\n- $audioBat\n- $subBat\n- $mergeBat\n- $cleanBat\n\n";
+        echo "\nDone. Created:\n";
+        foreach ([$videoBat, $audioBat, $subBat, $mergeBat, $cleanBat] as $bat) {
+            if (file_exists($bat)) echo "- $bat\n";
+        }
+        echo "\n";
     }
 
     private function swapExt($filename, $newExt, $suffix='') {
