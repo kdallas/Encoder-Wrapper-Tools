@@ -718,34 +718,13 @@ class BatchEncoder
 
             // --- SUBTITLE & CHAPTER LOGIC ---
             $subJobs = "";
-            $subInputs = "";
-            $subMaps   = "";
+            $mkvSubInputs = ""; // mkvmerge per-file options + path, one entry per subtitle
             $subClean  = "";
 
-            // Input Index Tracker for Muxer
-            // 0=Video (PreMux or Source), 1=Audio (OutAud, or Source when aud-only)
-            $nextMuxIndex = 2;
-            $srcIsMuxInput = $isAudPassthrough; // Source is added as mux input 1 for audio passthrough
-
-            // Chapter Logic (Map from Source)
-            $chapterMapArgs = "";
+            // Chapters need no mapping: mkvmerge carries them from whichever input holds
+            // them (the source), so there is no input index to track.
             if ($probeData['has_chapters']) {
-                if ($isVideoCopy) {
-                    // Source is already mux input 0 (global --video=copy, or a vid-only rescue);
-                    // re-adding it would open the same file twice.
-                    $chapterMapArgs = " -map_chapters 0";
-                } elseif ($srcIsMuxInput) {
-                    // Source already present as mux input 1 (aud-only); don't add it twice
-                    $chapterMapArgs = " -map_chapters 1";
-                } else {
-                    // Add Source File as Input to Muxer just for chapters
-                    $subInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
-
-                    // Map chapters from this input (Index 2 usually)
-                    $chapterMapArgs = " -map_chapters $nextMuxIndex";
-                    $nextMuxIndex++;
-                }
-                echo "  [Chapter]: Mapping directly from Source.\n";
+                echo "  [Chapter]: Carried from Source input.\n";
             }
 
             // Subtitle Logic
@@ -776,11 +755,14 @@ class BatchEncoder
                         $this->toWinPath($subOut),
                     );
 
-                    // Add to Muxer
-                    $subInputs .= sprintf(' -i "%s"', $this->toWinPath($subOut));
-                    $subMaps   .= sprintf(' -map %d:0', $nextMuxIndex);
+                    // Add to Muxer. The extraction above keeps a single stream, so the
+                    // subtitle is track ID 0 within its own file.
+                    $mkvSubInputs .= sprintf(
+                        ' -D -A --language 0:%s --default-track-flag 0:0 "%s"',
+                        $sub['lang'],
+                        $this->toWinPath($subOut),
+                    );
                     $subClean  .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($subOut));
-                    $nextMuxIndex++;
 
                     echo "  [Subtitle]: Keeping Track {$sub['index']} ({$sub['lang']}" . ($sub['forced'] ? ' Forced' : '') . ")\n";
                 }
@@ -795,10 +777,15 @@ class BatchEncoder
 
             // --- PER-TRACK SMART AUDIO LOGIC & MAPS & FLAGS ---
             $audMapStr = "";
-            $audPassMapStr = ""; // Maps audio directly from the source file (aud-only passthrough)
             $audDispStr = "";
             $finalAudOptsStr = "";
             $outAudIndex = 0;
+            // mkvmerge per-input track options. outAud holds only audio in mapping order, so
+            // $outAudIndex doubles as its track ID; the passthrough variant indexes the
+            // source file's own track IDs instead.
+            $audMkvOpts = "";
+            $audPassMkvOpts = "";
+            $audPassTracks = [];
             // Per-file copy of --default-lang: consumed by the first matching track in THIS file,
             // so every file in the batch gets its default flagged (not just the first file).
             $defaultLangPending = $this->defaultLang;
@@ -807,7 +794,6 @@ class BatchEncoder
 
             foreach ($keepTracks as $track) {
                 $audMapStr .= " -map 0:{$track['index']}";
-                $audPassMapStr .= " -map 1:{$track['index']}";
 
                 // 1. Fetch exact codec and channels for THIS specific track
                 // FIX: Removed "0:" from the stream specifier
@@ -929,6 +915,25 @@ class BatchEncoder
                 }
 
                 $audDispStr .= " -disposition:a:$outAudIndex " . ($isDef ? 'default' : '0');
+                // Same decision again in mkvmerge's terms: --default-track-flag is indexed by
+                // the track ID inside the input file it precedes, not by output position.
+                // Non-default is emitted explicitly, since mkvmerge would otherwise pick its
+                // own default when no flag is given.
+                $audMkvOpts .= sprintf(
+                    ' --language %d:%s --default-track-flag %d:%d',
+                    $outAudIndex,
+                    $track['lang'],
+                    $outAudIndex,
+                    $isDef,
+                );
+                $audPassMkvOpts .= sprintf(
+                    ' --language %d:%s --default-track-flag %d:%d',
+                    $track['index'],
+                    $track['lang'],
+                    $track['index'],
+                    $isDef,
+                );
+                $audPassTracks[] = $track['index'];
                 $outAudIndex++;
             }
 
@@ -974,14 +979,12 @@ class BatchEncoder
 
             $outVid = $this->wrkPath . $this->swapExt($fileName, 'h265');
             $outAud = $this->wrkPath . $this->swapExt($fileName, $audioExt);
-            $preMux = $this->wrkPath . $this->swapExt($fileName, 'mkv', '__');
             $finMkv = $this->wrkPath . $this->swapExt($fileName, 'mkv');
 
             $currentVidOptions = trim(preg_replace('/\s+/', ' ', $this->finalVidOptions . " $colorParams $hdrParams $chromaParams $cllParams"));
 
             // Format Commands (Use toWinPath() here for the Batch File content)
 
-            $preMxJob = "";
             $cleanJob = "";
 
             if (!$isVideoCopy) {
@@ -994,17 +997,10 @@ class BatchEncoder
                     $this->toWinPath($outVid),
                 );
 
-                // Pre-Mux Job
-                $preMxJob = sprintf(
-                    '%s -o "%s" "%s"' . "\n",
-                    $this->toWinPath(Config::get('MKV_MRG')),
-                    $this->toWinPath($preMux),
-                    $this->toWinPath($outVid),
-                );
-
-                // Cleanup items for Encode mode
+                // No pre-mux: mkvmerge reads the raw HEVC directly for the final mux and
+                // derives the frame rate from the SPS VUI, which is what the old
+                // intermediate existed to provide.
                 $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($outVid));
-                $cleanJob .= sprintf('Remove-Item "%s"' . "\n", $this->toWinPath($preMux));
             } else {
                 echo $isVidPassthrough
                     ? "  [Video]: Vid-Only Passthrough (skip-size match). Skipping Encode.\n"
@@ -1029,56 +1025,90 @@ class BatchEncoder
                 $this->toWinPath($outAud),
             );
 
-            // Mux Job
-            $muxCmd = $this->toWinPath(Config::get('MKV_MUX'));
-            $muxInputs = "";
-            $muxMaps = "";
+            // Mux Job (mkvmerge)
+            // Per-file options must precede the file they apply to. Track-selection flags
+            // (-D/-A/-S) apply to the next file only, but track-property options
+            // (--language, --default-track-flag) persist to every following file — so each
+            // input re-declares its own properties instead of relying on a default.
+            $muxCmd = $this->toWinPath(Config::get('MKV_MRG'));
+            $mkvInputs = "";
+
+            // Video language (raw HEVC carries none, so default to und like ffmpeg did)
+            $videoLangArg = !empty($probeData['video_lang']) ? $probeData['video_lang'] : 'und';
 
             // 1. Video Input
             if ($isVideoCopy) {
-                // Input 0: Source File (Map Source Video Track 0)
-                $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
-                $muxMaps   .= " -map 0:v:0";
+                // Source File: provides video, plus chapters and attachments. When the audio
+                // is also coming from the source (--video=copy with --aud-only) the file is
+                // opened once rather than twice, which is what the ffmpeg path did.
+                $mkvInputs .= sprintf(
+                    ' %s --default-track-flag 0:1 --language 0:%s%s "%s"',
+                    $isAudPassthrough ? '-S' : '-A -S',
+                    $videoLangArg,
+                    $isAudPassthrough ? $audPassMkvOpts : '',
+                    $this->toWinPath($cleanPath),
+                );
             } else {
-                // Input 0: Encoded Video (Map PreMux Video Track 0)
-                $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($preMux));
-                $muxMaps   .= " -map 0:v:0";
+                // Encoded Video: the raw HEVC file itself.
+                $mkvInputs .= sprintf(
+                    ' --default-track-flag 0:1 --language 0:%s "%s"',
+                    $videoLangArg,
+                    $this->toWinPath($outVid),
+                );
             }
 
             // 2. Audio Input
             if ($isAudPassthrough) {
-                // Input 1: Source File (audio taken directly from the original, per keepTracks)
-                $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($cleanPath));
-                $muxMaps   .= ($audPassMapStr !== "") ? $audPassMapStr . $audDispStr : " -map 1:a";
+                if (!$isVideoCopy) {
+                    // Source File: audio taken directly from the original, per keepTracks.
+                    // An empty selection (probe failure) omits --audio-tracks so the source
+                    // contributes all of its audio, matching the old -map 1:a fallback.
+                    $audSelArg = empty($audPassTracks) ? '' : ' --audio-tracks ' . implode(',', $audPassTracks);
+                    $mkvInputs .= sprintf(
+                        ' -D -S%s%s "%s"',
+                        $audSelArg,
+                        $audPassMkvOpts,
+                        $this->toWinPath($cleanPath),
+                    );
+                }
+                // else: the combined case already opened the source above.
             } else {
-                // Input 1: Audio File (Map ALL tracks from this new file)
-                $muxInputs .= sprintf(' -i "%s"', $this->toWinPath($outAud));
-                $muxMaps   .= " -map 1:a";
+                // Encoded Audio File. --no-chapters is load-bearing: the audio job below does
+                // not pass -map_chapters -1, so ffmpeg copies the source's chapters into the
+                // .mka, and mkvmerge merges chapters from every input — which would double
+                // them. ffmpeg's -map_chapters picked one input and ignored the rest.
+                $mkvInputs .= sprintf(' -D -S --no-chapters%s "%s"', $audMkvOpts, $this->toWinPath($outAud));
             }
 
-            // 3. Subtitles & Chapters Inputs
-            // Appended dynamically (e.g. -i source for chapters, -i sub_eng.mkv...)
-            $muxInputs .= $subInputs;
+            // 3. Subtitle Inputs
+            $mkvInputs .= $mkvSubInputs;
 
-            // 4. Map Arguments
-            // Appended dynamically (e.g. -map_chapters 2 -map 3:0...)
-            $muxMaps   .= " $chapterMapArgs $subMaps";
+            // 4. Chapters & Attachments
+            // The source is added as an extras-only input whenever it is not already one.
+            // An input contributing no tracks is accepted, so this preserves any embedded
+            // subtitle fonts without needing a separate attachment probe. Tags are
+            // suppressed to match the previous ffmpeg pipeline, whose input 0 was the
+            // (tagless) intermediate.
+            if (!$isVideoCopy && !$isAudPassthrough) {
+                $mkvInputs .= sprintf(
+                    ' -D -A -S --no-global-tags --no-track-tags "%s"',
+                    $this->toWinPath($cleanPath),
+                );
+            }
 
-            // Video language metadata
-            $videoMeta = "";
-            if (!empty($probeData['video_lang'])) {
-                $videoMeta = "-metadata:s:v:0 language=" . $probeData['video_lang'];
+            // Title (an empty string strips it)
+            $titleArg = "";
+            if ($this->titleInput !== null) {
+                $titleArg = sprintf(' --title "%s"', $this->titleInput);
             }
 
             // Generate Final Command
             $muxerJob = sprintf(
-                '%s %s %s %s %s -c copy "%s"' . "\n",
+                '%s -o "%s"%s%s' . "\n",
                 $muxCmd,
-                $muxInputs,
-                $muxMaps,
-                $metaArgs,
-                $videoMeta,
                 $this->toWinPath($finMkv),
+                $titleArg,
+                $mkvInputs,
             );
 
             // Remaining Cleanup
@@ -1093,10 +1123,9 @@ class BatchEncoder
             echo "Queuing: $displaySrc\n";
 
             // Write to Files (Restored Original Block Structure)
-            // Only write Video/PreMux if we are NOT copying
+            // Only write the Video job if we are NOT copying
             if (!$isVideoCopy) {
                 file_put_contents($videoBat, $videoJob, FILE_APPEND);
-                file_put_contents($mergeBat, $preMxJob, FILE_APPEND);
             }
             if (strlen($subJobs)) {
                 file_put_contents($subBat, $subJobs, FILE_APPEND);

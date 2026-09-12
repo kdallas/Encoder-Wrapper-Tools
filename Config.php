@@ -7,11 +7,11 @@ class Config
 
     // --- DEFAULTS (Fallback if .env.yaml is missing) ---
     private static $defaults = [
-        'MKV_MRG' => 'E:/Apps/mkvtoolnix/mkvmerge.exe',
+        'MKV_MRG' => 'E:/Apps/mkvtoolnix/mkvmerge.exe', // Final mux for the standard workflow
         'MKV_PED' => 'E:/Apps/mkvtoolnix/mkvpropedit.exe',
         'VID_ENC' => 'E:/Apps/NVEnc/NVEncC64.exe',
-        'AUD_ENC' => 'E:/Apps/ffmpeg/ffmpeg.exe',
-        'MKV_MUX' => 'E:/Apps/ffmpeg/ffmpeg.exe',
+        'AUD_ENC' => 'E:/Apps/ffmpeg/ffmpeg.exe', // Audio encoding and subtitle extraction
+        'MKV_MUX' => 'E:/Apps/ffmpeg/ffmpeg.exe', // Custom-mux workflow only (ffmpeg args from file)
         'FFPROBE' => 'E:/Apps/ffmpeg/ffprobe.exe',
 
         // DEFAULTS (Also set in .env, then can be overridden via CLI)

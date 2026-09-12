@@ -47,11 +47,11 @@ The system is configured via `.env.yaml` with fallback to paths in `Config.php`.
 `.env-example.yaml`:
 ```yaml
 # Tool Paths
-MKV_MRG: "E:/Apps/mkvtoolnix/mkvmerge.exe"
+MKV_MRG: "E:/Apps/mkvtoolnix/mkvmerge.exe"    # Final mux for the standard workflow
 MKV_PED: "E:/Apps/mkvtoolnix/mkvpropedit.exe"
 VID_ENC: "E:/Apps/NVEnc/NVEncC64.exe"
-AUD_ENC: "E:/Apps/ffmpeg/ffmpeg.exe"
-MKV_MUX: "E:/Apps/ffmpeg/ffmpeg.exe"
+AUD_ENC: "E:/Apps/ffmpeg/ffmpeg.exe"          # Audio encoding and subtitle extraction
+MKV_MUX: "E:/Apps/ffmpeg/ffmpeg.exe"          # Custom-mux workflow only (ffmpeg args from file)
 FFPROBE: "E:/Apps/ffmpeg/ffprobe.exe"
 
 # Defaults
@@ -65,11 +65,11 @@ class Config
 {
     // --- DEFAULTS (Fallback if .env.yaml is missing) ---
     private static $defaults = [
-        'MKV_MRG' => 'E:/Apps/mkvtoolnix/mkvmerge.exe',
+        'MKV_MRG' => 'E:/Apps/mkvtoolnix/mkvmerge.exe', // Final mux for the standard workflow
         'MKV_PED' => 'E:/Apps/mkvtoolnix/mkvpropedit.exe',
         'VID_ENC' => 'E:/Apps/NVEnc/NVEncC64.exe',
-        'AUD_ENC' => 'E:/Apps/ffmpeg/ffmpeg.exe',
-        'MKV_MUX' => 'E:/Apps/ffmpeg/ffmpeg.exe', // Used for final muxing
+        'AUD_ENC' => 'E:/Apps/ffmpeg/ffmpeg.exe', // Audio encoding and subtitle extraction
+        'MKV_MUX' => 'E:/Apps/ffmpeg/ffmpeg.exe', // Custom-mux workflow only (ffmpeg args from file)
         'FFPROBE' => 'E:/Apps/ffmpeg/ffprobe.exe',
 
         // DEFAULTS (Also set in .env, then can be overridden via CLI)
@@ -260,12 +260,12 @@ This mode allows you to modify file headers (Default flags, Track Names) in-plac
 
 ## **Output**
 
-Upon completion, the application generates five PowerShell scripts in the job directory:
+Upon completion, the application generates up to five PowerShell scripts in the job directory. Some are omitted when they have nothing to do — there is no `_sub.ps1` when the source has no matching subtitles, and no `_aud.ps1` for `--aud-only` files:
 
 - **\[Prefix\]\_vid.ps1**: Runs the hardware video encoding.
 - **\[Prefix\]\_aud.ps1**: Processes the audio streams.
 - **\[Prefix\]\_sub.ps1**: Extracts and prepares subtitle files.
-- **\[Prefix\]\_mux.ps1**: Merges video, audio, subs, and chapters into the final MKV.
+- **\[Prefix\]\_mux.ps1**: Merges video, audio, subs, and chapters into the final MKV with `mkvmerge`. Video is muxed straight from the raw HEVC output, and any attachments embedded in the source (such as subtitle fonts) are carried across.
 - **\[Prefix\]\_del.ps1**: Cleans up all intermediate temporary files.
 
 ## **Workflow**
